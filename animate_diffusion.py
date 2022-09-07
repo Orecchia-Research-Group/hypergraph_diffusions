@@ -20,7 +20,7 @@ STEP_SIZE = 1e-1
 EPS = 1e-6
 
 
-def animate_diffusion(degree, x, fx, label_names, labels):
+def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names, labels, screenshots):
     '''
     Animate the results of a diffusion
     '''
@@ -29,7 +29,7 @@ def animate_diffusion(degree, x, fx, label_names, labels):
     func_ax = plt.subplot2grid((5, 1), (4, 0))
 
     # Get PCA of x
-    T, n, d = x.shape
+    T, n, _ = x.shape
     pca = PCA(n_components=2)
     x_pca = np.zeros([T, n, 2])
     for i, embedding in enumerate(x):
@@ -101,6 +101,12 @@ def animate_diffusion(degree, x, fx, label_names, labels):
             animate(frame)
             plt.draw()
 
+    frame_saves = np.linspace(T - 1, 0, screenshots).astype(int)[::-1]
+    for i, fr in enumerate(frame_saves):
+        screenshot_filename = f'{graph_name}_{diffusion_function}_diffusion_{i:03d}.png'
+        animate(fr)
+        fig.savefig(screenshot_filename, bbox_inches='tight', dpi=500)
+
     fig.canvas.mpl_connect('key_press_event', onClick)
     ani = FuncAnimation(fig, animate, frames=generate_frame, interval=40, repeat=True, repeat_delay=1500)
     return ani
@@ -138,7 +144,7 @@ def parse_args():
     '''Parse arguments'''
     parser = argparse.ArgumentParser(description='Animate an electrical flow diffusion.')
     parser.add_argument('-g', '--hypergraph', help='Filename of hypergeraph to use.', type=str, required=True)
-    parser.add_argument('--step-size', help='Step size value', type=float, default=STEP_SIZE)
+    parser.add_argument('--step-size', help='Step size value.', type=float, default=STEP_SIZE)
     parser.add_argument('-s', '--seed', help='Filename storing the seed vectors for each node.', type=str, default=None)
     parser.add_argument('-l', '--labels', help='Filename containing the groundtruth communities', type=str, default=None)
     parser.add_argument('-f', '--function', help='Which diffusion function to use.', choices=diffusion_functions.keys(), default=list(diffusion_functions.keys())[0])
@@ -146,6 +152,7 @@ def parse_args():
     parser.add_argument('-e', '--epsilon', help='Epsilon used for convergence criterion.', type=float, default=EPS)
     parser.add_argument('--no-save', help='Disable saving the animation. Results in faster completion time.', action='store_true')
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
+    parser.add_argument('--screenshots', help='How many screeshots of the animation to save.', default=0, type=int)
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     args = parser.parse_args()
     return args
@@ -178,7 +185,7 @@ def main():
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
     x, _, fx = diffusion_functions[args.function](n, m, degree, hypergraph, x0, s=s, h=args.step_size, verbose=args.verbose, eps=args.epsilon)
-    ani = animate_diffusion(degree, x, fx, label_names, labels)
+    ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots)
     if not args.no_save:
         ani.save(f'{graph_name}_diffusion_animation.gif', writer='imagemagick', fps=10)
     plt.show()
