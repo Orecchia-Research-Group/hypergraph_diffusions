@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from sklearn.decomposition import PCA
 
-from diffusion_functions import diffusion_functions
+from diffusion_functions import diffusion_functions, diffusion
 
 
 STEP_SIZE = 1e-1
@@ -184,7 +184,7 @@ def main():
     if args.verbose > 0:
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
-    x, _, fx = diffusion_functions[args.function](n, m, degree, hypergraph, x0, s=s, h=args.step_size, verbose=args.verbose, eps=args.epsilon)
+    x, _, fx = diffusion(x0, n, m, degree, hypergraph, diffusion_functions[args.function], s=s, h=args.step_size, verbose=args.verbose, eps=args.epsilon)
     ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots)
     if not args.no_save:
         ani.save(f'{graph_name}_diffusion_animation.gif', writer='imagemagick', fps=10)
