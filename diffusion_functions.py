@@ -14,7 +14,7 @@ EPS = 1e-6
 H = 0.1
 
 
-def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, eps=EPS, verbose=0):
+def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, T=None, eps=EPS, verbose=0):
     values = []
     i = []
     j = []
@@ -37,7 +37,7 @@ def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, eps=EPS, verbose=0):
     t = 1
     t_start = datetime.now()
     print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
-    while len(x) < 2 or crit > eps:
+    while (len(x) < 2 or crit > eps) and (T is None or t < T):
         gradient, new_y, new_fx = func(x[-1], s, sparse_h, rank, D)
         y.append(new_y)
         fx.append(new_fx)
@@ -67,7 +67,7 @@ def quadratic(x, s, sparse_h, rank, D):
     \\partial \\bar{\\delta}_h(x) = \\sign(x_h  - \\bar{x_h})
     '''
     y = np.divide((sparse_h @ x).T, rank).T
-    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.linalg.norm(x.T @ s, ord=2)
+    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.einsum('ij,ij->', x, s)
     gradient = np.subtract(x - s, ((sparse_h.T @ y).T / D).T)
     return gradient, y, fx
 
@@ -86,13 +86,15 @@ def linear(x, s, sparse_h, rank, D):
     he = sparse_h.col
     k = 0
     for i, r in enumerate(rank):
-        y[i] = np.median([x[he[j]] for j in range(k, k+int(r))], axis=0)
+        y[i, :] = np.median([x[he[j]] for j in range(k, k+int(r))], axis=0)
         k += int(r)
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.linalg.norm(x.T @ s, ord=1)
+    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.einsum('ij,ij->', x, s)
     gradient = np.subtract(x - s, ((sparse_h.T @ y).T / D).T)
     return gradient, y, fx
 
 
+# This would be the vectorized version.
+# Unfortunately it doesn't seem to work.
 def infinity(x, s, sparse_h, rank, D):
     '''
     Range diffusion using the infinity norm
@@ -135,19 +137,45 @@ def infinity(x, s, sparse_h, rank, D):
         x_d_coo = sparse.coo_matrix((x_d_values, (sparse_h.row, sparse_h.col)), shape=(m, n))
         x_d.append(np.array(np.abs(x_d_coo).sum(axis=0)).squeeze())
         x_d[d][x_d[d] == 0] = 1
-        actual_sparse_h = sparse.coo_matrix((sparse_h.data * (x_argmax_values - x_argmin_values), (sparse_h.row, sparse_h.col)), shape=(m, n))
+        actual_sparse_h = sparse.coo_matrix((sparse_h.data * (x_argmax_values + x_argmin_values), (sparse_h.row, sparse_h.col)), shape=(m, n))
         gradient.append(np.subtract(x[:, d] - s[:, d], ((actual_sparse_h.T @ y[d]).T / x_d[d]).T))
 
     gradient = np.array(gradient).T
     y = np.array(y).T
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=np.inf)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.linalg.norm(x.T @ s, ord=np.inf)
+    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=np.inf)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.linalg.norm(x.T @ s, ord=2)
     return gradient, y, fx
 
 
+def nonvectorized_infinity(x, s, sparse_h, rank, D):
+    hypergraph = []
+    he = sparse_h.col
+    k = 0
+    for r in rank:
+        hypergraph.append([he[j] for j in range(k, k + int(r))])
+        k += int(r)
+    gradient = np.zeros(x.shape)
+    degree = np.zeros(x.shape)
+    y = np.zeros((len(rank), x.shape[-1]))
+    fx = 0
+    for i, e in enumerate(hypergraph):
+        xe = x[e]
+        y_max = xe.max(axis=0)
+        y_min = xe.min(axis=0)
+        y[i, :] = y_min + (y_max - y_min) / 2
+        argmax = (xe == y_max)
+        argmin = (xe == y_min)
+        degree[e] += (argmax | argmin)
+        gradient[e] += (xe - y[i, :]) * (argmax.astype(int) + argmin.astype(int))
+        fx += np.linalg.norm(y[i, :] - y_min, ord=np.inf)
+    degree[degree == 0] = 1
+    gradient /= degree
+    gradient -= s
+    fx -= np.einsum('ij,ij->', x, s)
+    return gradient, y, fx
 
 
 diffusion_functions = OrderedDict([
     ('quadratic', quadratic),
     ('linear', linear),
-    ('infinity', infinity),
+    ('infinity', nonvectorized_infinity),
 ])

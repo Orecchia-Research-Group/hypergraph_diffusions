@@ -7,6 +7,7 @@ animate an electrical flow diffusion.
 
 import os
 import argparse
+from collections import Counter
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,11 +30,14 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
     func_ax = plt.subplot2grid((5, 1), (4, 0))
 
     # Get PCA of x
-    T, n, _ = x.shape
-    pca = PCA(n_components=2)
-    x_pca = np.zeros([T, n, 2])
-    for i, embedding in enumerate(x):
-        x_pca[i, :, :] = pca.fit_transform(embedding)
+    T, n, dimensions = x.shape
+    if dimensions > 2:
+        pca = PCA(n_components=2)
+        x_pca = np.zeros([T, n, 2])
+        for i, embedding in enumerate(x):
+            x_pca[i, :, :] = pca.fit_transform(embedding)
+    else:
+        x_pca = x
 
     # Plot hypergraph
     node_collection = graph_ax.scatter(x[0, :, 0], x[0, :, 1], s=np.sqrt(degree), c=labels, alpha=0.4, cmap='Spectral')
@@ -108,14 +112,35 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
         fig.savefig(screenshot_filename, bbox_inches='tight', dpi=500)
 
     fig.canvas.mpl_connect('key_press_event', onClick)
-    ani = FuncAnimation(fig, animate, frames=generate_frame, interval=40, repeat=True, repeat_delay=1500)
+    ani = FuncAnimation(fig, animate, frames=generate_frame, interval=40, repeat=True, repeat_delay=1500, save_count=T)
     return ani
 
 
-def read_seed(filename):
+def read_seed(filename, labels, dimensions):
     '''Read seed from a file where each line has the seed for the corresponding node'''
+    p = None
     if filename is None:
         return None
+    try:
+        p = float(filename)
+    except ValueError:
+        pass
+    if p is not None:
+        n = len(labels)
+        number_labels = len(set(labels))
+        if number_labels != dimensions:
+            raise ValueError(f'When using percentage seed, dimension space should equal number of labels. Labels: {number_labels}. Dimensions: {dimensions}.')
+        ch = np.random.rand(n) < p
+        train_examples = ch.sum()
+        s = np.zeros([n, number_labels])
+        s[ch] = -1
+        label_counter = Counter(labels)
+        for l in set(labels):
+            s[ch, l] /= (train_examples - label_counter[l])
+        idx = np.where(ch)[0]
+        for i in idx:
+            s[i, labels[i]] = 1 / label_counter[labels[i]]
+        return s
     with open(filename) as f:
         s = np.array([[float(i) for i in line.split()] for line in f])
     return s
@@ -153,6 +178,7 @@ def parse_args():
     parser.add_argument('--no-save', help='Disable saving the animation. Results in faster completion time.', action='store_true')
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
     parser.add_argument('--screenshots', help='How many screeshots of the animation to save.', default=0, type=int)
+    parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=None)
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     args = parser.parse_args()
     return args
@@ -172,11 +198,11 @@ def main():
     if args.verbose > 0:
         print(f'Reading hypergraph from file {args.hypergraph}')
     n, m, degree, hypergraph = read_hypergraph(args.hypergraph)
-    s = read_seed(args.seed)
     label_names, labels = read_labels(args.labels)
     if len(label_names) == 0:
         label_names = ['Nodes']
         labels = [0] * n
+    s = read_seed(args.seed, labels, args.dimensions)
     if args.random_seed is None:
         args.random_seed = np.random.randint(1000000)
     np.random.seed(args.random_seed)
@@ -184,10 +210,10 @@ def main():
     if args.verbose > 0:
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
-    x, _, fx = diffusion(x0, n, m, degree, hypergraph, diffusion_functions[args.function], s=s, h=args.step_size, verbose=args.verbose, eps=args.epsilon)
+    x, _, fx = diffusion(x0, n, m, degree, hypergraph, diffusion_functions[args.function], s=s, h=args.step_size, T=args.iterations, verbose=args.verbose, eps=args.epsilon)
     ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots)
     if not args.no_save:
-        ani.save(f'{graph_name}_diffusion_animation.gif', writer='imagemagick', fps=10)
+        ani.save(f'{graph_name}_{args.function}_diffusion.gif', writer='imagemagick', fps=10)
     plt.show()
 
 
