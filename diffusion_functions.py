@@ -1,8 +1,8 @@
-'''
+"""
 A set of diffusion functions over hypergraphs
 
 
-'''
+"""
 
 from datetime import datetime
 from collections import OrderedDict
@@ -57,7 +57,7 @@ def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, T=None, eps=EPS, verbo
 
 
 def quadratic(x, s, sparse_h, rank, D):
-    '''
+    """
     Quadratic diffusion
 
     \\bar{\\delta}_h(x) = \\sum_{i \\in h} |x_i - \\bar{x_h}|
@@ -65,15 +65,15 @@ def quadratic(x, s, sparse_h, rank, D):
     The diffusion is
 
     \\partial \\bar{\\delta}_h(x) = \\sign(x_h  - \\bar{x_h})
-    '''
+    """
     y = np.divide((sparse_h @ x).T, rank).T
     fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x - s, ((sparse_h.T @ y).T / D).T)
+    gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
     return gradient, y, fx
 
 
 def linear(x, s, sparse_h, rank, D):
-    '''
+    """
     Linear diffusion
 
     \\bar{\\delta}_h(x) = \\sum_{i \\in h} |x_i - median(\\bar{x_h})|
@@ -81,7 +81,7 @@ def linear(x, s, sparse_h, rank, D):
     The diffusion is
 
     \\partial \\bar{\\delta}_h(x) = \\sign(x_h - median(x_h))
-    '''
+    """
     y = np.zeros([len(rank), x.shape[-1]])
     he = sparse_h.col
     k = 0
@@ -89,14 +89,14 @@ def linear(x, s, sparse_h, rank, D):
         y[i, :] = np.median([x[he[j]] for j in range(k, k+int(r))], axis=0)
         k += int(r)
     fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x - s, ((sparse_h.T @ y).T / D).T)
+    gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
     return gradient, y, fx
 
 
 # This would be the vectorized version.
 # Unfortunately it doesn't seem to work.
 def infinity(x, s, sparse_h, rank, D):
-    '''
+    """
     Range diffusion using the infinity norm
 
     \\bar{\\delta}_h(x) = \\max_{i \\in h} x_i - \\min_{j \\in h} x_j
@@ -104,7 +104,7 @@ def infinity(x, s, sparse_h, rank, D):
     The subgradient is
 
     \\partial \\bar{\\delta}_h(x) = \\mathbbm{1}_{i \\in argmax x} - \\mathbbm{1}_{j \\in argmin x}
-    '''
+    """
     m, n = sparse_h.shape
     he = sparse_h.col
     xe = []
@@ -169,7 +169,7 @@ def nonvectorized_infinity(x, s, sparse_h, rank, D):
         fx += np.linalg.norm(y[i, :] - y_min, ord=np.inf)
     degree[degree == 0] = 1
     gradient /= degree
-    gradient -= s
+    gradient -= (s.T / D).T
     fx -= np.einsum('ij,ij->', x, s)
     return gradient, y, fx
 
