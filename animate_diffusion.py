@@ -1,13 +1,12 @@
-'''
+"""
 Animate Hypergraph Diffusion
 
 Given a hypergraph and one of the available diffusions
 animate an electrical flow diffusion.
-'''
+"""
 
 import os
 import argparse
-from collections import Counter
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,6 +14,7 @@ from matplotlib.animation import FuncAnimation
 from sklearn.decomposition import PCA
 
 from diffusion_functions import diffusion_functions, diffusion
+import reading
 
 
 STEP_SIZE = 1e-1
@@ -22,9 +22,7 @@ EPS = 1e-6
 
 
 def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names, labels, screenshots):
-    '''
-    Animate the results of a diffusion
-    '''
+    """Animate the results of a diffusion"""
     fig = plt.figure()
     graph_ax = plt.subplot2grid((5, 1), (0, 0), rowspan=4)
     func_ax = plt.subplot2grid((5, 1), (4, 0))
@@ -71,7 +69,6 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
             yield frame
             frame += 1
 
-
     def animate(fr):
         nonlocal frame
         frame = fr
@@ -116,68 +113,20 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
     return ani
 
 
-def read_seed(filename, labels, dimensions):
-    '''Read seed from a file where each line has the seed for the corresponding node'''
-    p = None
-    if filename is None:
-        return None
-    try:
-        p = float(filename)
-    except ValueError:
-        pass
-    if p is not None:
-        n = len(labels)
-        number_labels = len(set(labels))
-        if number_labels != dimensions:
-            raise ValueError(f'When using percentage seed, dimension space should equal number of labels. Labels: {number_labels}. Dimensions: {dimensions}.')
-        ch = np.random.rand(n) < p
-        train_examples = ch.sum()
-        s = np.zeros([n, number_labels])
-        s[ch] = -1
-        label_counter = Counter(labels)
-        for l in set(labels):
-            s[ch, l] /= (train_examples - label_counter[l])
-        idx = np.where(ch)[0]
-        for i in idx:
-            s[i, labels[i]] = 1 / label_counter[labels[i]]
-        return s
-    with open(filename) as f:
-        s = np.array([[float(i) for i in line.split()] for line in f])
-    return s
-
-
-def read_hypergraph(filename):
-    '''Read a hypergraph and return n, m and a list of participating nodes'''
-    with open(filename) as f:
-        m, n, _ = [int(i) for i in f.readline().split()]
-        hypergraph = [[int(i) - 1 for i in f.readline().split()] for _ in range(m)]
-        degree = [float(f.readline()) for _ in range(n)]
-    return n, m, degree, hypergraph
-
-
-def read_labels(filename):
-    '''Groundtruth community labels'''
-    if filename is None:
-        return [], []
-    with open(filename) as f:
-        label_names = f.readline().split()
-        labels = [int(i) for i in f]
-    return label_names, labels
-
-
 def parse_args():
-    '''Parse arguments'''
+    """Parse arguments"""
     parser = argparse.ArgumentParser(description='Animate an electrical flow diffusion.')
-    parser.add_argument('-g', '--hypergraph', help='Filename of hypergeraph to use.', type=str, required=True)
+    parser.add_argument('-g', '--hypergraph', help='Filename of hypergraph to use.', type=str, required=True)
     parser.add_argument('--step-size', help='Step size value.', type=float, default=STEP_SIZE)
     parser.add_argument('-s', '--seed', help='Filename storing the seed vectors for each node.', type=str, default=None)
     parser.add_argument('-l', '--labels', help='Filename containing the groundtruth communities', type=str, default=None)
     parser.add_argument('-f', '--function', help='Which diffusion function to use.', choices=diffusion_functions.keys(), default=list(diffusion_functions.keys())[0])
     parser.add_argument('-r', '--random-seed', help='Random seed to use for initialization.', type=int, default=None)
     parser.add_argument('-e', '--epsilon', help='Epsilon used for convergence criterion.', type=float, default=EPS)
+    parser.add_argument('--no-plot', help='Skip plotting to focus with classification.', action='store_true')
     parser.add_argument('--no-save', help='Disable saving the animation. Results in faster completion time.', action='store_true')
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
-    parser.add_argument('--screenshots', help='How many screeshots of the animation to save.', default=0, type=int)
+    parser.add_argument('--screenshots', help='How many screenshots of the animation to save.', default=0, type=int)
     parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=None)
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     args = parser.parse_args()
@@ -185,24 +134,24 @@ def parse_args():
 
 
 def main():
-    '''
+    """
     Main controlling function
 
     Process arguments
     Read hypergraph
     Compute diffusion
     Animate and show
-    '''
+    """
     args = parse_args()
     graph_name = os.path.basename(os.path.splitext(args.hypergraph)[0])
     if args.verbose > 0:
         print(f'Reading hypergraph from file {args.hypergraph}')
-    n, m, degree, hypergraph = read_hypergraph(args.hypergraph)
-    label_names, labels = read_labels(args.labels)
+    n, m, degree, hypergraph = reading.read_hypergraph(args.hypergraph)
+    label_names, labels = reading.read_labels(args.labels)
     if len(label_names) == 0:
         label_names = ['Nodes']
         labels = [0] * n
-    s = read_seed(args.seed, labels, args.dimensions)
+    s = reading.read_seed(args.seed, labels, args.dimensions, degree)
     if args.random_seed is None:
         args.random_seed = np.random.randint(1000000)
     np.random.seed(args.random_seed)
@@ -211,10 +160,11 @@ def main():
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
     x, _, fx = diffusion(x0, n, m, degree, hypergraph, diffusion_functions[args.function], s=s, h=args.step_size, T=args.iterations, verbose=args.verbose, eps=args.epsilon)
-    ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots)
-    if not args.no_save:
-        ani.save(f'{graph_name}_{args.function}_diffusion.gif', writer='imagemagick', fps=10)
-    plt.show()
+    if not args.no_plot:
+        ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots)
+        if not args.no_save:
+            ani.save(f'{graph_name}_{args.function}_diffusion.gif', writer='imagemagick', fps=10)
+        plt.show()
 
 
 if __name__ == '__main__':
