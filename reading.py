@@ -57,6 +57,6 @@ def read_labels(filename):
     if filename is None:
         return [], []
     with open(filename) as f:
-        label_names = f.readline().split()
+        label_names = np.array(f.readline().split())
         labels = [int(i) for i in f]
     return label_names, labels

@@ -11,7 +11,11 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+
 from sklearn.decomposition import PCA
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import RidgeClassifier
+from sklearn.metrics import confusion_matrix, classification_report, plot_confusion_matrix
 
 from diffusion_functions import diffusion_functions, diffusion
 import reading
@@ -113,6 +117,20 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
     return ani
 
 
+def train(x, y, label_names, verbose=0):
+    """Use diffusion results to train a model."""
+    x_train, x_test, y_train, y_test = train_test_split(x, y)
+    clf = RidgeClassifier(normalize=True, class_weight='balanced')
+    clf.fit(x_train, y_train)
+    y_pred = clf.predict(x_test)
+    # conf_matrix = confusion_matrix(label_names[y_test], label_names[y_pred])
+    if verbose > 0:
+        print(classification_report(y_test, y_pred))
+        fig = plt.Figure()
+        plot_confusion_matrix(clf, x_test, y_test, display_labels=label_names, values_format='d')
+        plt.show()
+
+
 def parse_args():
     """Parse arguments"""
     parser = argparse.ArgumentParser(description='Animate an electrical flow diffusion.')
@@ -128,6 +146,7 @@ def parse_args():
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
     parser.add_argument('--screenshots', help='How many screenshots of the animation to save.', default=0, type=int)
     parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=None)
+    parser.add_argument('--confusion', help='Produce a confusion matrix.', action='store_true')
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     args = parser.parse_args()
     return args
@@ -160,6 +179,9 @@ def main():
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
     x, _, fx = diffusion(x0, n, m, degree, hypergraph, diffusion_functions[args.function], s=s, h=args.step_size, T=args.iterations, verbose=args.verbose, eps=args.epsilon)
+
+    if args.confusion:
+        train(x[-1], labels, label_names, verbose=args.verbose)
     if not args.no_plot:
         ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots)
         if not args.no_save:

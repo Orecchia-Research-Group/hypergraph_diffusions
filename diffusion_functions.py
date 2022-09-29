@@ -67,7 +67,7 @@ def quadratic(x, s, sparse_h, rank, D):
     \\partial \\bar{\\delta}_h(x) = \\sign(x_h  - \\bar{x_h})
     """
     y = np.divide((sparse_h @ x).T, rank).T
-    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.einsum('ij,ij->', x, s)
+    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
     gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
     return gradient, y, fx
 
@@ -88,7 +88,7 @@ def linear(x, s, sparse_h, rank, D):
     for i, r in enumerate(rank):
         y[i, :] = np.median([x[he[j]] for j in range(k, k+int(r))], axis=0)
         k += int(r)
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.einsum('ij,ij->', x, s)
+    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
     gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
     return gradient, y, fx
 
@@ -170,7 +170,7 @@ def nonvectorized_infinity(x, s, sparse_h, rank, D):
     degree[degree == 0] = 1
     gradient /= degree
     gradient -= (s.T / D).T
-    fx -= np.einsum('ij,ij->', x, s)
+    # fx -= np.einsum('ij,ij->', x, s)
     return gradient, y, fx
 
 
