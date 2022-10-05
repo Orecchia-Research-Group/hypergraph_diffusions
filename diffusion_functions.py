@@ -76,7 +76,7 @@ def linear(x, s, sparse_h, rank, D):
     """
     Linear diffusion
 
-    \\bar{\\delta}_h(x) = \\sum_{i \\in h} |x_i - median(\\bar{x_h})|
+    \\bar{\\delta}_h(x) = \\sum_{i \\in h} \\x_i - median(\\bar{x_h})|
 
     The diffusion is
 

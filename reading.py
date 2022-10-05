@@ -60,3 +60,12 @@ def read_labels(filename):
         label_names = np.array(f.readline().split())
         labels = [int(i) for i in f]
     return label_names, labels
+
+
+def read_positions(filename):
+    """Manual positions"""
+    if filename is None:
+        return None
+    with open(filename) as f:
+        positions = np.array([[float(i) for i in line.split()] for line in f])
+        return positions
