@@ -3,14 +3,14 @@ import sys
 import argparse
 
 import json
-from collections import defaultdict
-
+from collections import defaultdict, OrderedDict
+from itertools import product
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def convert_fauci_email(input_directory, verbose=0):
-    '''fauci-email: a json digest of Anthony Fauci's released emails
+    """fauci-email: a json digest of Anthony Fauci's released emails
 
     @article{Benson-2021-fauci-emails,
         author = {Austin Benson and Nate Veldt and David F. Gleich},
@@ -33,7 +33,7 @@ def convert_fauci_email(input_directory, verbose=0):
     }
 
     Note: Am I REALLY citing buzzfeed
-    '''
+    """
 
     json_filename = 'fauci-email-data.json'
     MAX_THREAD_PARTICIPANTS = 25
@@ -78,13 +78,58 @@ def convert_fauci_email(input_directory, verbose=0):
     return n, m, degree, hypergraph, node_dict, labels, label_names
 
 
+def generate_grid(input_directory, verbose=0):
+    """Grid Hypergraph
+
+    Use input_directory to pass in `n` and `m`, the two dimensions of the grid.
+    Create a grid n x m and then treat each node as a hyperedge of its incident edges.
+    """
+    try:
+        n, m = [int(i) for i in input_directory.split()]
+    except ValueError:
+        raise ValueError(f'Expected integer dimensions of grid, instead got {input_directory}.')
+    hypergraph = []
+    degree = defaultdict(int)
+    name_dict = OrderedDict()
+    for i, j in product(range(n), range(m)):
+        nodes = []
+        if i > 0:
+            node = j + (i - 1) * (2 * m - 1) + (m - 1) + 1
+            degree[node] += 1
+            nodes.append(node)
+        if j > 0:
+            node = (j - 1) + i * (2 * m - 1) + 1
+            degree[node] += 1
+            nodes.append(node)
+        if j < m - 1:
+            name_dict[i * (2 * m - 1) + j + 1] = f'{i / n} {j / m + 1 / (2 * m)}'
+            node = j + i * (2 * m - 1) + 1
+            degree[node] += 1
+            nodes.append(node)
+        if i < n - 1:
+            name_dict[i * (2 * m - 1) + j + m] = f'{i / n + 1 / (2 * n)} {j / m}'
+            node = j + i * (2 * m + 1) + (m - 1) + 1
+            degree[node] += 1
+            nodes.append(node)
+        hypergraph.append(nodes)
+    print(max(degree.keys()))
+    node_dict = OrderedDict([(name_dict[k], k) for k in sorted(name_dict.keys())])
+    label_names = ['Temperature']
+    node_labels = []
+    for k in sorted(name_dict.keys()):
+        i, j = [float(f) for f in name_dict[k].split()]
+        node_labels.append((i + j) / 2)
+    return (n - 1) * (2 * m - 1) + m - 1, n * m, degree, hypergraph, node_dict, node_labels, None
+
+
 CONVERSION_FUNCTION = {
     'fauci_email': convert_fauci_email,
+    'grid': generate_grid,
 }
 
 
 def write_hypergraph(filename, n, m, degree, hypergraph):
-    '''Writes `hypergraph` to filename.'''
+    """Writes `hypergraph` to filename."""
     with open(filename, 'w') as f_out:
         print(f'{m} {n} 10', file=f_out)
         for e in hypergraph:
@@ -94,7 +139,7 @@ def write_hypergraph(filename, n, m, degree, hypergraph):
 
 
 def write_node_dict(filename, node_dict, verbose=0):
-    '''Writes in every line which actual node each hmetis node in [n] translates to.'''
+    """Writes in every line which actual node each hmetis node in [n] translates to."""
     if node_dict is None:
         if verbose > 0:
             print(f'There is no node_dict to be written in {filename}.')
@@ -105,15 +150,16 @@ def write_node_dict(filename, node_dict, verbose=0):
 
 
 def write_labels(filename, label_names, labels, verbose=0):
-    '''Write the labels, one in each line'''
+    """Write the labels, one in each line"""
     with open(filename, 'w') as f_out:
-        print(' '.join(label_names), file=f_out)
+        if label_names is not None:
+            print(' '.join(label_names), file=f_out)
         for label in labels:
             print(label, file=f_out)
 
 
 def parse_args():
-    '''Parses arguments.'''
+    """Parses arguments."""
     parser = argparse.ArgumentParser(description='Convert the varying hypergraph formats into the uniform hMETIS format.')
     parser.add_argument('-i', '--input_directory', help='Directory where the raw data is stored.', type=str, default=SRC_DIR)
     parser.add_argument('-o', '--output_directory', help='Directory to write the processed results.', type=str, default=SRC_DIR)
