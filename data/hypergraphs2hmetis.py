@@ -114,17 +114,65 @@ def generate_grid(input_directory, verbose=0):
         hypergraph.append(nodes)
     print(max(degree.keys()))
     node_dict = OrderedDict([(name_dict[k], k) for k in sorted(name_dict.keys())])
-    label_names = ['Temperature']
     node_labels = []
     for k in sorted(name_dict.keys()):
         i, j = [float(f) for f in name_dict[k].split()]
         node_labels.append((i + j) / 2)
+    degree = [degree[k] for k in sorted(degree.keys())]
     return (n - 1) * (2 * m - 1) + m - 1, n * m, degree, hypergraph, node_dict, node_labels, None
+
+
+def generate_nodeGrid(input_directory, verbose=0):
+    """Node Grid Hypergraph
+
+    Use input_directory to pass in `n` and `m`, the two dimensions of the grid.
+    Create a grid n x m and then treat each node neighborhood as a hyperedge.
+    """
+    def coord2ind(i, j):
+        return i * m + j + 1
+
+    try:
+        n, m = [int(i) for i in input_directory.split()]
+    except ValueError:
+        raise ValueError(f'Expected integer dimensions of grid, instead got {input_directory}.')
+    hypergraph = []
+    degree = defaultdict(int)
+    name_dict = OrderedDict()
+    for i, j in product(range(n), range(m)):
+        node = coord2ind(i, j)
+        degree[node] += 1
+        nodes = [node]
+        name_dict[node] = f'{i / n} {j / m}'
+        if i > 0:
+            node = coord2ind(i - 1, j)
+            degree[node] += 1
+            nodes.append(node)
+        if j > 0:
+            node = coord2ind(i, j - 1)
+            degree[node] += 1
+            nodes.append(node)
+        if i < n - 1:
+            node = coord2ind(i + 1, j)
+            degree[node] += 1
+            nodes.append(node)
+        if j < m - 1:
+            node = coord2ind(i, j + 1)
+            degree[node] += 1
+            nodes.append(node)
+        hypergraph.append(nodes)
+    node_dict = OrderedDict([(name_dict[k], k) for k in sorted(name_dict.keys())])
+    node_labels = []
+    for k in sorted(name_dict.keys()):
+        i, j = [float(f) for f in name_dict[k].split()]
+        node_labels.append((i + j) / 2)
+    degree = [degree[k] for k in sorted(degree.keys())]
+    return n * m, n * m, degree, hypergraph, node_dict, node_labels, None
 
 
 CONVERSION_FUNCTION = {
     'fauci_email': convert_fauci_email,
     'grid': generate_grid,
+    'nodeGrid': generate_nodeGrid,
 }
 
 
