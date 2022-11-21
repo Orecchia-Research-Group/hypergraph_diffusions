@@ -5,7 +5,7 @@ A set of diffusion functions over hypergraphs
 """
 
 from datetime import datetime
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict, Counter
 import numpy as np
 from scipy import sparse
 
@@ -14,20 +14,14 @@ EPS = 1e-6
 H = 0.1
 
 
-def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, T=None, eps=EPS, verbose=0):
-    values = []
-    i = []
-    j = []
-    for row, e in enumerate(hypergraph):
-        values.extend([1] * len(e))
-        i.extend([row] * len(e))
-        j.extend(e)
-    sparse_h = sparse.coo_matrix((values, (i, j)), shape=(m, n))
-    print('Created sparse matrix')
+def diffusion(x0, n, m, D, hypergraph, weights, func, s=None, h=H, T=None, eps=EPS, verbose=0):
+
+    W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
+
     x = [np.array(x0)]
     if s is None:
         s = np.zeros(shape=x[-1].shape)
-    rank = np.array(sparse_h.sum(axis=1)).squeeze()
+
     if verbose > 0:
         print(f'Average degree = {sum(D) / n:.3f}. Average rank = {sum(rank) / m:.3f}')
     x = [x0]
@@ -38,7 +32,7 @@ def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, T=None, eps=EPS, verbo
     t_start = datetime.now()
     print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     while (len(x) < 2 or crit > eps) and (T is None or t < T):
-        gradient, new_y, new_fx = func(x[-1], s, sparse_h, rank, D)
+        gradient, new_y, new_fx = func(x[-1], s, sparse_h, rank, W, D)
         y.append(new_y)
         fx.append(new_fx)
         if verbose > 0:
@@ -47,7 +41,7 @@ def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, T=None, eps=EPS, verbo
         x.append(x[-1] - h * gradient)
         crit = np.linalg.norm((D * (x[-1] - x[-2]).T) @ (x[-1] - x[-2]))
         t += 1
-    _, new_y, new_fx = func(x[-1], s, sparse_h, rank, D)
+    _, new_y, new_fx = func(x[-1], s, sparse_h, rank, W, D)
     y.append(new_y)
     fx.append(new_fx)
     if verbose > 0:
@@ -55,8 +49,27 @@ def diffusion(x0, n, m, D, hypergraph, func, s=None, h=H, T=None, eps=EPS, verbo
         print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1]):14.6f}')
     return np.array(x), np.array(y), np.array(fx)
 
+def compute_hypergraph_matrices(n, m, hypergraph, weights):
+    if weights is None:
+        weights = defaultdict(lambda: 1)
+    values = []
+    i = []
+    j = []
+    w = []
+    for row, e in enumerate(hypergraph):
+        values.extend([1] * len(e))
+        i.extend([row] * len(e))
+        j.extend(e)
+        w.append(weights[e])
+    W = sparse.diags(w).tocsr()
+    sparse_h = sparse.coo_matrix((values, (i, j)), shape=(m, n))
+    print('Created sparse matrix')
 
-def quadratic(x, s, sparse_h, rank, D):
+    rank = Counter(sparse_h.row)
+    rank = np.array([rank[k] for k in sorted(rank.keys())])
+    return W, sparse_h, rank
+
+def quadratic(x, s, sparse_h, rank, W, D):
     """
     Quadratic diffusion
 
@@ -67,12 +80,12 @@ def quadratic(x, s, sparse_h, rank, D):
     \\partial \\bar{\\delta}_h(x) = \\sign(x_h  - \\bar{x_h})
     """
     y = np.divide((sparse_h @ x).T, rank).T
-    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
+    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, W.data.T)]) / 2 # - np.einsum('ij,ij->', x, s)
+    gradient = np.subtract(x, ((sparse_h.T @ W @ y + s).T / D).T)
     return gradient, y, fx
 
 
-def linear(x, s, sparse_h, rank, D):
+def linear(x, s, sparse_h, rank, W, D):
     """
     Linear diffusion
 
@@ -88,14 +101,14 @@ def linear(x, s, sparse_h, rank, D):
     for i, r in enumerate(rank):
         y[i, :] = np.median([x[he[j]] for j in range(k, k+int(r))], axis=0)
         k += int(r)
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
+    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, W.data)]) / 2 # - np.einsum('ij,ij->', x, s)
     gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
     return gradient, y, fx
 
 
 # This would be the vectorized version.
 # Unfortunately it doesn't seem to work.
-def infinity(x, s, sparse_h, rank, D):
+def infinity(x, s, sparse_h, rank, W, D):
     """
     Range diffusion using the infinity norm
 
@@ -146,7 +159,7 @@ def infinity(x, s, sparse_h, rank, D):
     return gradient, y, fx
 
 
-def nonvectorized_infinity(x, s, sparse_h, rank, D):
+def nonvectorized_infinity(x, s, sparse_h, rank, W, D):
     hypergraph = []
     he = sparse_h.col
     k = 0
@@ -154,21 +167,28 @@ def nonvectorized_infinity(x, s, sparse_h, rank, D):
         hypergraph.append([he[j] for j in range(k, k + int(r))])
         k += int(r)
     gradient = np.zeros(x.shape)
-    degree = np.zeros(x.shape)
+    #degree = np.zeros(x.shape)
+    degree = np.array(D)
     y = np.zeros((len(rank), x.shape[-1]))
     fx = 0
     for i, e in enumerate(hypergraph):
         xe = x[e]
+        de = degree[e]
         y_max = xe.max(axis=0)
         y_min = xe.min(axis=0)
         y[i, :] = y_min + (y_max - y_min) / 2
         argmax = (xe == y_max)
         argmin = (xe == y_min)
-        degree[e] += (argmax | argmin)
-        gradient[e] += (xe - y[i, :]) * (argmax.astype(int) + argmin.astype(int))
+        # degree[e] += (argmax | argmin) * W[i, i]
+        maxmult = argmax.astype(int)
+        minmult = argmin.astype(int)
+        gradient[e] += W[i, i] * np.einsum('ij,i,ij->ij', xe - y[i, :], de, maxmult / (de @ maxmult) + minmult / (de @ minmult))
+        # The following line performs slightly better, but the above line is cleaner
+        # and used np.einsum, therefore it is OBVIOUSLY better
+        # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
         fx += np.linalg.norm(y[i, :] - y_min, ord=np.inf)
-    degree[degree == 0] = 1
-    gradient /= degree
+    # degree[degree == 0] = 1
+    gradient = (gradient.T / D).T
     gradient -= (s.T / D).T
     # fx -= np.einsum('ij,ij->', x, s)
     return gradient, y, fx
