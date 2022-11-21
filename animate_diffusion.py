@@ -175,7 +175,7 @@ def main():
     graph_name = os.path.basename(os.path.splitext(args.hypergraph)[0])
     if args.verbose > 0:
         print(f'Reading hypergraph from file {args.hypergraph}')
-    n, m, degree, hypergraph = reading.read_hypergraph(args.hypergraph)
+    n, m, degree, hypergraph, weights = reading.read_hypergraph(args.hypergraph)
     if args.random_seed is None:
         args.random_seed = np.random.randint(1000000)
     np.random.seed(args.random_seed)
@@ -194,7 +194,7 @@ def main():
     if args.verbose > 0:
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
-    x, _, fx = diffusion(x0, n, m, degree, hypergraph, diffusion_functions[args.function], s=s, h=args.step_size, T=args.iterations, verbose=args.verbose, eps=args.epsilon)
+    x, _, fx = diffusion(x0, n, m, degree, hypergraph, weights, diffusion_functions[args.function], s=s, h=args.step_size, T=args.iterations, verbose=args.verbose, eps=args.epsilon)
 
     if args.confusion:
         train(x[-1], labels, label_names, verbose=args.verbose)

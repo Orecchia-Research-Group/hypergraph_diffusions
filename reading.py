@@ -46,10 +46,25 @@ def read_seed(filename, labels, dimensions, D):
 def read_hypergraph(filename):
     """Read a hypergraph and return n, m and a list of participating nodes"""
     with open(filename) as f:
-        m, n, _ = [int(i) for i in f.readline().split()]
-        hypergraph = [[int(i) - 1 for i in f.readline().split()] for _ in range(m)]
-        degree = [float(f.readline()) for _ in range(n)]
-    return n, m, degree, hypergraph
+        weights = None
+        first_line = [int(i) for i in f.readline().split()]
+        m, n = first_line[:2]
+        fmt = first_line[2] if len(first_line) > 2 else 0
+        if fmt % 10 == 1:
+            weights = {}
+        hypergraph = []
+        for _ in range(m):
+            start = 0
+            line = f.readline().split()
+            if fmt % 10 == 1:
+                w = float(line[0])
+                start = 1
+            hypergraph.append(tuple([int(i) - 1 for i in line[start:]]))
+            if fmt % 10 == 1:
+                weights[hypergraph[-1]] = w
+        if fmt // 10 == 1:
+            degree = [float(f.readline()) for _ in range(n)]
+    return n, m, degree, hypergraph, weights
 
 
 def read_labels(filename):
