@@ -6,6 +6,8 @@ import json
 from collections import defaultdict, OrderedDict
 from itertools import product
 
+import numpy as np
+
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -75,7 +77,7 @@ def convert_fauci_email(input_directory, verbose=0):
         average_rank = sum([len(e) for e in hypergraph]) / len(hypergraph)
         average_degree = sum(people_degree.values()) / len(people_degree)
         print(f'Fauce Email: |V| = {n}, |E| = {m}, Average Rank = {average_rank:.3f}, Average Degree = {average_degree:.3f}')
-    return n, m, degree, hypergraph, node_dict, labels, label_names
+    return n, m, degree, hypergraph, None, node_dict, labels, label_names
 
 
 def generate_grid(input_directory, verbose=0):
@@ -119,7 +121,7 @@ def generate_grid(input_directory, verbose=0):
         i, j = [float(f) for f in name_dict[k].split()]
         node_labels.append((i + j) / 2)
     degree = [degree[k] for k in sorted(degree.keys())]
-    return (n - 1) * (2 * m - 1) + m - 1, n * m, degree, hypergraph, node_dict, node_labels, None
+    return (n - 1) * (2 * m - 1) + m - 1, n * m, degree, hypergraph, None, node_dict, node_labels, None
 
 
 def generate_nodeGrid(input_directory, verbose=0):
@@ -138,50 +140,103 @@ def generate_nodeGrid(input_directory, verbose=0):
     hypergraph = []
     degree = defaultdict(int)
     name_dict = OrderedDict()
+    weights = {}
     for i, j in product(range(n), range(m)):
         node = coord2ind(i, j)
         degree[node] += 1
         nodes = [node]
         name_dict[node] = f'{i / n} {j / m}'
+        w = 1
         if i > 0:
             node = coord2ind(i - 1, j)
-            degree[node] += 1
             nodes.append(node)
+            w += 1
         if j > 0:
             node = coord2ind(i, j - 1)
-            degree[node] += 1
             nodes.append(node)
+            w += 1
         if i < n - 1:
             node = coord2ind(i + 1, j)
-            degree[node] += 1
             nodes.append(node)
+            w += 1
         if j < m - 1:
             node = coord2ind(i, j + 1)
-            degree[node] += 1
             nodes.append(node)
+            w += 1
+        for node in nodes:
+            degree[node] += w
+        nodes = tuple(sorted(nodes))
         hypergraph.append(nodes)
+        weights[tuple(nodes)] = w
     node_dict = OrderedDict([(name_dict[k], k) for k in sorted(name_dict.keys())])
     node_labels = []
-    for k in sorted(name_dict.keys()):
-        i, j = [float(f) for f in name_dict[k].split()]
-        node_labels.append((i + j) / 2)
+    node_labels = np.zeros([n, m])
+    node_labels[n // 5:(4 * n) // 5, m // 5: (4 * m) // 5] = 1
+    node_labels = node_labels.reshape(-1)
+    #for k in sorted(name_dict.keys()):
+    #    i, j = [float(f) for f in name_dict[k].split()]
+    #    node_labels.append((i + j) / 2)
     degree = [degree[k] for k in sorted(degree.keys())]
-    return n * m, n * m, degree, hypergraph, node_dict, node_labels, None
+    return n * m, n * m, degree, hypergraph, weights, node_dict, node_labels, None
+
+
+def generate_clique(input_directory, verbose=0):
+    """Connected Cliques
+
+    Use input_directory to pass in `n` and `k`, the number of nodes and clusters.
+    Create `k` hyperedges of `n` // `k` nodes each with weight `n` // `k` and
+    a hyperedge over all nodes with weight 1.
+    """
+    try:
+        n, k = [int(i) for i in input_directory.split()]
+    except ValueError:
+        raise ValueError(f'Expected integer dimensions of grid, instead got {input_directory}.')
+    hypergraph = []
+    weights = {}
+    degree = []
+    name_dict = OrderedDict()
+    node_labels = []
+    p = 0
+    cat = 1
+    for i in np.linspace(n / k, n, k):
+        end = int(i)
+        nodes = tuple([j + 1 for j in range(p, end)])
+        node_labels.extend([cat] * (end - p))
+        hypergraph.append(nodes)
+        w = end - p
+        weights[nodes] = w
+        m_x, m_y = np.cos(2 * np.pi * i / n), np.sin(2 * np.pi * i / n)
+        pos = np.random.normal((m_x, m_y), size=(end - p, 2))
+        for j, v in enumerate(pos):
+            name_dict[p + j] = f'{v[0]:.6f} {v[1]:.6f}'
+            degree.append(w + 1)
+        p = end
+        cat += 1
+    nodes = tuple(range(1, n+1))
+    hypergraph.append(nodes)
+    weights[nodes] = 1
+    node_dict = OrderedDict([(name_dict[k], k) for k in sorted(name_dict.keys())])
+    label_names = [str(i) for i in range(1, k + 1)]
+    return n, k+1, degree, hypergraph, weights, node_dict, node_labels, label_names
 
 
 CONVERSION_FUNCTION = {
     'fauci_email': convert_fauci_email,
     'grid': generate_grid,
     'nodeGrid': generate_nodeGrid,
+    'clique': generate_clique,
 }
 
 
-def write_hypergraph(filename, n, m, degree, hypergraph):
+def write_hypergraph(filename, n, m, degree, hypergraph, weights=None):
     """Writes `hypergraph` to filename."""
     with open(filename, 'w') as f_out:
-        print(f'{m} {n} 10', file=f_out)
+        print(f'{m} {n}', end='', file=f_out)
+        print(' 10' if weights is None else ' 11', file=f_out)
         for e in hypergraph:
-            print(*sorted(e), file=f_out)
+            if weights is not None:
+                print(weights[e], end=' ', file=f_out)
+            print(*e, file=f_out)
         for d in degree:
             print(d, file=f_out)
 
@@ -235,11 +290,11 @@ def main():
                 print(f'There is no conversion function registered for hypergraph {name}.', file=sys.stderr)
             continue
         function = CONVERSION_FUNCTION[name]
-        n, m, degree, hypergraph, node_dict, labels, label_names = function(input_directory, verbose=verbose)
+        n, m, degree, hypergraph, weights, node_dict, labels, label_names = function(input_directory, verbose=verbose)
         if hypergraph is None:
             print(f'Unable to load {name} from {input_directory}. Check files.')
             continue
-        write_hypergraph(hmetis_filename, n, m, degree, hypergraph)
+        write_hypergraph(hmetis_filename, n, m, degree, hypergraph, weights)
         write_node_dict(dict_filename, node_dict)
         write_labels(label_filename, label_names, labels)
 

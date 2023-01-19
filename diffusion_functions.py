@@ -49,6 +49,7 @@ def diffusion(x0, n, m, D, hypergraph, weights, func, s=None, h=H, T=None, eps=E
         print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1]):14.6f}')
     return np.array(x), np.array(y), np.array(fx)
 
+
 def compute_hypergraph_matrices(n, m, hypergraph, weights):
     if weights is None:
         weights = defaultdict(lambda: 1)
@@ -68,6 +69,7 @@ def compute_hypergraph_matrices(n, m, hypergraph, weights):
     rank = Counter(sparse_h.row)
     rank = np.array([rank[k] for k in sorted(rank.keys())])
     return W, sparse_h, rank
+
 
 def quadratic(x, s, sparse_h, rank, W, D):
     """
