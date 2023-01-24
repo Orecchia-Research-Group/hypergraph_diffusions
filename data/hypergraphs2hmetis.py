@@ -141,35 +141,43 @@ def generate_nodeGrid(input_directory, verbose=0):
     degree = defaultdict(int)
     name_dict = OrderedDict()
     weights = {}
+    center_id = {}
+    hypergraph_node_weights = {}
     for i, j in product(range(n), range(m)):
         node = coord2ind(i, j)
         degree[node] += 1
         nodes = [node]
         name_dict[node] = f'{i / n} {j / m}'
+        hyperedge_node_weights = [1]
         w = 1
         if i > 0:
             node = coord2ind(i - 1, j)
             nodes.append(node)
             w += 1
+            hyperedge_node_weights.append(np.exp(-1 / n))
         if j > 0:
             node = coord2ind(i, j - 1)
             nodes.append(node)
             w += 1
+            hyperedge_node_weights.append(np.exp(-1 / m))
         if i < n - 1:
             node = coord2ind(i + 1, j)
             nodes.append(node)
             w += 1
+            hyperedge_node_weights.append(np.exp(-1 / n))
         if j < m - 1:
             node = coord2ind(i, j + 1)
             nodes.append(node)
             w += 1
+            hyperedge_node_weights.append(np.exp(-1 / m))
         for node in nodes:
             degree[node] += w
-        nodes = tuple(sorted(nodes))
+        nodes = tuple(nodes)
         hypergraph.append(nodes)
-        weights[tuple(nodes)] = w
+        weights[nodes] = w
+        center_id[nodes] = coord2ind(i, j)
+        hypergraph_node_weights[nodes] = hyperedge_node_weights
     node_dict = OrderedDict([(name_dict[k], k) for k in sorted(name_dict.keys())])
-    node_labels = []
     node_labels = np.zeros([n, m])
     node_labels[n // 5:(4 * n) // 5, m // 5: (4 * m) // 5] = 1
     node_labels = node_labels.reshape(-1)
@@ -177,7 +185,7 @@ def generate_nodeGrid(input_directory, verbose=0):
     #    i, j = [float(f) for f in name_dict[k].split()]
     #    node_labels.append((i + j) / 2)
     degree = [degree[k] for k in sorted(degree.keys())]
-    return n * m, n * m, degree, hypergraph, weights, node_dict, node_labels, None
+    return n * m, n * m, degree, hypergraph, weights, node_dict, node_labels, None, center_id, hypergraph_node_weights
 
 
 def generate_clique(input_directory, verbose=0):
@@ -228,15 +236,23 @@ CONVERSION_FUNCTION = {
 }
 
 
-def write_hypergraph(filename, n, m, degree, hypergraph, weights=None):
+def write_hypergraph(filename, n, m, degree, hypergraph, weights=None, center_id=None, hypergraph_node_weights=None):
     """Writes `hypergraph` to filename."""
     with open(filename, 'w') as f_out:
-        print(f'{m} {n}', end='', file=f_out)
-        print(' 10' if weights is None else ' 11', file=f_out)
+        print(f'{m} {n}', end=' ', file=f_out)
+        print(int(center_id is not None), end='', file=f_out)
+        print(int(hypergraph_node_weights is not None), end='', file=f_out)
+        print(1, end='', file=f_out)
+        print(int(weights is not None), end='\n', file=f_out)
         for e in hypergraph:
             if weights is not None:
                 print(weights[e], end=' ', file=f_out)
-            print(*e, file=f_out)
+            if center_id is not None:
+                print(center_id[e], end=' ', file=f_out)
+            if hypergraph_node_weights is not None:
+                print(' '.join([f'{node} {w}' for node, w in zip(e, hypergraph_node_weights[e])]), file=f_out)
+            else:
+                print(*e, file=f_out)
         for d in degree:
             print(d, file=f_out)
 
@@ -290,11 +306,11 @@ def main():
                 print(f'There is no conversion function registered for hypergraph {name}.', file=sys.stderr)
             continue
         function = CONVERSION_FUNCTION[name]
-        n, m, degree, hypergraph, weights, node_dict, labels, label_names = function(input_directory, verbose=verbose)
+        n, m, degree, hypergraph, weights, node_dict, labels, label_names, center_id, hypergraph_node_weights = function(input_directory, verbose=verbose)
         if hypergraph is None:
             print(f'Unable to load {name} from {input_directory}. Check files.')
             continue
-        write_hypergraph(hmetis_filename, n, m, degree, hypergraph, weights)
+        write_hypergraph(hmetis_filename, n, m, degree, hypergraph, weights, center_id, hypergraph_node_weights)
         write_node_dict(dict_filename, node_dict)
         write_labels(label_filename, label_names, labels)
 
