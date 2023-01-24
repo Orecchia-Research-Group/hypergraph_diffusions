@@ -175,7 +175,7 @@ def main():
     graph_name = os.path.basename(os.path.splitext(args.hypergraph)[0])
     if args.verbose > 0:
         print(f'Reading hypergraph from file {args.hypergraph}')
-    n, m, degree, hypergraph, weights = reading.read_hypergraph(args.hypergraph)
+    n, m, node_weights, hypergraph, weights, center_id, hypergraph_node_weights = reading.read_hypergraph(args.hypergraph)
     if args.random_seed is None:
         args.random_seed = np.random.randint(1000000)
     np.random.seed(args.random_seed)
@@ -189,17 +189,21 @@ def main():
         label_names = ['Nodes']
         labels = [0] * n
     pos = reading.read_positions(args.position)
-    s = reading.read_seed(args.seed, labels, args.dimensions, degree)
+    s = reading.read_seed(args.seed, labels, args.dimensions, node_weights)
 
     if args.verbose > 0:
         print(f'Performing diffusion on hypergraph with {n} nodes and {m} hyperedges.')
         print(f'Random seed = {args.random_seed}')
-    x, _, fx = diffusion(x0, n, m, degree, hypergraph, weights, diffusion_functions[args.function], s=s, h=args.step_size, T=args.iterations, verbose=args.verbose, eps=args.epsilon)
+    x, _, fx = diffusion(x0, n, m, node_weights, hypergraph,
+                         weights, center_id, hypergraph_node_weights,
+                         diffusion_functions[args.function],
+                         s=s, h=args.step_size, T=args.iterations,
+                         verbose=args.verbose, eps=args.epsilon)
 
     if args.confusion:
         train(x[-1], labels, label_names, verbose=args.verbose)
     if not args.no_plot:
-        ani = animate_diffusion(graph_name, args.function, degree, x, fx, label_names, labels, args.screenshots, pos=pos)
+        ani = animate_diffusion(graph_name, args.function, node_weights, x, fx, label_names, labels, args.screenshots, pos=pos)
         if not args.no_save:
             ani.save(f'{graph_name}_{args.function}_diffusion.gif', writer='imagemagick', fps=10)
         plt.show()

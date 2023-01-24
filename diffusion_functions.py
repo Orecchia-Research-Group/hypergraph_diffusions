@@ -14,7 +14,136 @@ EPS = 1e-6
 H = 0.1
 
 
-def diffusion(x0, n, m, D, hypergraph, weights, func, s=None, h=H, T=None, eps=EPS, verbose=0):
+# FUCK numpy for not supporting weighted norms
+def weighted_median(values, sample_weight=None):
+    """ Very close to numpy.percentile, but supports weights.
+    NOTE: quantiles should be in [0, 1]!
+    :param values: numpy.array with data
+    :param sample_weight: array-like of the same length as `array`
+    :return: numpy.array with computed quantiles.
+    """
+    values = np.array(values)
+    quantiles = np.array(0.5)
+    if sample_weight is None:
+        sample_weight = np.ones(len(values))
+    sample_weight = np.array(sample_weight)
+
+    sorter = np.argsort(values, axis=0)
+    values = np.array([values[s, i] for i, s in enumerate(sorter.T)])
+    sample_weight = sample_weight[sorter]
+
+    weighted_quantiles = np.cumsum(sample_weight, axis=0) / np.sum(sample_weight, axis=0)
+    return [np.interp(quantiles, weighted_quantiles[:, i], values[i, :]) for i in range(weighted_quantiles.shape[1])]
+
+
+def compute_hypergraph_matrices(n, m, hypergraph, weights, hypergraph_node_weights=None):
+    if weights is None:
+        weights = defaultdict(lambda: 1)
+    values = []
+    i = []
+    j = []
+    w = []
+    for row, e in enumerate(hypergraph):
+        values.extend([1] * len(e) if hypergraph_node_weights is None else hypergraph_node_weights[e])
+        i.extend([row] * len(e))
+        j.extend(e)
+        w.append(weights[e])
+    W = sparse.diags(w).tocsr()
+    sparse_h = sparse.coo_matrix((values, (i, j)), shape=(m, n))
+    rank = np.array(sparse_h.sum(axis=0)).squeeze()
+    return W, sparse_h, rank
+
+
+def quadratic(x, s, sparse_h, rank, W, D, center_id=None):
+    """
+    Quadratic diffusion
+
+    \\bar{\\delta}_h(x) = \\sum_{i \\in h} |x_i - \\bar{x_h}|
+
+    The diffusion is
+
+    \\partial \\bar{\\delta}_h(x) = \\sign(x_h  - \\bar{x_h})
+    """
+    if center_id is None:
+        y = np.divide((sparse_h @ x).T, rank).T
+    else:
+        y = x[center_id]
+    fx = sum([w * wv * np.linalg.norm(x[j] - y[i])**2 for i, j, wv, w in zip(sparse_h.row, sparse_h.col, sparse_h.data, W.data.T)]) / 2 # - np.einsum('ij,ij->', x, s)
+    gradient = np.subtract(x, ((sparse_h.T @ W @ y + s).T / D).T)
+    return gradient, y, fx
+
+
+def linear(x, s, sparse_h, rank, W, D, center_id=None):
+    """
+    Linear diffusion
+
+    \\bar{\\delta}_h(x) = \\sum_{i \\in h} \\x_i - median(\\bar{x_h})|
+
+    The diffusion is
+
+    \\partial \\bar{\\delta}_h(x) = \\sign(x_h - median(x_h))
+    """
+    y = np.zeros([len(rank), x.shape[-1]])
+    he = sparse_h.col
+    row_counter = Counter(sparse_h.row)
+    k = 0
+    for i, r in enumerate(rank):
+        if center_id is None:
+            y[i, :] = weighted_median([x[he[j]] for j in range(k, k+row_counter[i])],
+                                      sample_weight=sparse_h.data[k:k+row_counter[i]])
+        else:
+            y[i, :] = x[center_id[i]]
+        k += row_counter[i]
+    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, W.data)]) / 2 # - np.einsum('ij,ij->', x, s)
+    gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
+    return gradient, y, fx
+
+
+def nonvectorized_infinity(x, s, sparse_h, rank, W, D, center_id=None, hypergraph_node_weights=None):
+    hypergraph = []
+    he = sparse_h.col
+    k = 0
+    for r in rank:
+        hypergraph.append([he[j] for j in range(k, k + int(r))])
+        k += int(r)
+    gradient = np.zeros(x.shape)
+    #degree = np.zeros(x.shape)
+    degree = np.array(D)
+    if hypergraph_node_weights is None:
+        hypergraph_node_weights = {tuple(e): [1] * len(e) for e in hypergraph}
+    y = np.zeros((len(rank), x.shape[-1]))
+    fx = 0
+    for i, e in enumerate(hypergraph):
+        xe = x[e]
+        we = np.array(hypergraph_node_weights[tuple(e)])
+        de = degree[e]
+        y_max = xe.max(axis=0)
+        y_min = xe.min(axis=0)
+        if center_id is None:
+            y[i, :] = y_min + (y_max - y_min) / 2
+        else:
+            y[i, :] = x[center_id[tuple(e)]]
+        dist = np.einsum('i,ij->ij', we, (xe - y[i, :]))
+        argmax = dist == dist.max(axis=0)
+        argmin = dist == dist.min(axis=0)
+        # degree[e] += (argmax | argmin) * W[i, i]
+        maxmult = argmax.astype(int)
+        minmult = argmin.astype(int)
+        gradient[e] += W[i, i] * np.einsum('ij,i,ij->ij', dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult))
+        # The following line performs slightly better, but the above line is cleaner
+        # and used np.einsum, therefore it is OBVIOUSLY better
+        # has not added hyperedge node weights below
+        # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
+        fx += np.linalg.norm(dist, ord=np.inf)
+    # degree[degree == 0] = 1
+    gradient = (gradient.T / D).T
+    gradient -= (s.T / D).T
+    # fx -= np.einsum('ij,ij->', x, s)
+    return gradient, y, fx
+
+
+def diffusion(x0, n, m, D, hypergraph, weights, center_id=None, hypergraph_node_weights=None,
+              func=nonvectorized_infinity, s=None, h=H, T=None, eps=EPS, verbose=0):
 
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
 
@@ -32,7 +161,7 @@ def diffusion(x0, n, m, D, hypergraph, weights, func, s=None, h=H, T=None, eps=E
     t_start = datetime.now()
     print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     while (len(x) < 2 or crit > eps) and (T is None or t < T):
-        gradient, new_y, new_fx = func(x[-1], s, sparse_h, rank, W, D)
+        gradient, new_y, new_fx = func(x[-1], s, sparse_h, rank, W, D, center_id=center_id)
         y.append(new_y)
         fx.append(new_fx)
         if verbose > 0:
@@ -48,152 +177,6 @@ def diffusion(x0, n, m, D, hypergraph, weights, func, s=None, h=H, T=None, eps=E
         t_now = datetime.now()
         print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1]):14.6f}')
     return np.array(x), np.array(y), np.array(fx)
-
-
-def compute_hypergraph_matrices(n, m, hypergraph, weights):
-    if weights is None:
-        weights = defaultdict(lambda: 1)
-    values = []
-    i = []
-    j = []
-    w = []
-    for row, e in enumerate(hypergraph):
-        values.extend([1] * len(e))
-        i.extend([row] * len(e))
-        j.extend(e)
-        w.append(weights[e])
-    W = sparse.diags(w).tocsr()
-    sparse_h = sparse.coo_matrix((values, (i, j)), shape=(m, n))
-    print('Created sparse matrix')
-
-    rank = Counter(sparse_h.row)
-    rank = np.array([rank[k] for k in sorted(rank.keys())])
-    return W, sparse_h, rank
-
-
-def quadratic(x, s, sparse_h, rank, W, D):
-    """
-    Quadratic diffusion
-
-    \\bar{\\delta}_h(x) = \\sum_{i \\in h} |x_i - \\bar{x_h}|
-
-    The diffusion is
-
-    \\partial \\bar{\\delta}_h(x) = \\sign(x_h  - \\bar{x_h})
-    """
-    y = np.divide((sparse_h @ x).T, rank).T
-    fx = sum([w * np.linalg.norm(x[j] - y[i])**2 for i, j, w in zip(sparse_h.row, sparse_h.col, W.data.T)]) / 2 # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x, ((sparse_h.T @ W @ y + s).T / D).T)
-    return gradient, y, fx
-
-
-def linear(x, s, sparse_h, rank, W, D):
-    """
-    Linear diffusion
-
-    \\bar{\\delta}_h(x) = \\sum_{i \\in h} \\x_i - median(\\bar{x_h})|
-
-    The diffusion is
-
-    \\partial \\bar{\\delta}_h(x) = \\sign(x_h - median(x_h))
-    """
-    y = np.zeros([len(rank), x.shape[-1]])
-    he = sparse_h.col
-    k = 0
-    for i, r in enumerate(rank):
-        y[i, :] = np.median([x[he[j]] for j in range(k, k+int(r))], axis=0)
-        k += int(r)
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, W.data)]) / 2 # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x, ((sparse_h.T @ y + s).T / D).T)
-    return gradient, y, fx
-
-
-# This would be the vectorized version.
-# Unfortunately it doesn't seem to work.
-def infinity(x, s, sparse_h, rank, W, D):
-    """
-    Range diffusion using the infinity norm
-
-    \\bar{\\delta}_h(x) = \\max_{i \\in h} x_i - \\min_{j \\in h} x_j
-
-    The subgradient is
-
-    \\partial \\bar{\\delta}_h(x) = \\mathbbm{1}_{i \\in argmax x} - \\mathbbm{1}_{j \\in argmin x}
-    """
-    m, n = sparse_h.shape
-    he = sparse_h.col
-    xe = []
-    x_d = []
-    ymax = []
-    ymin = []
-    y = []
-    gradient = []
-    for d in range(x.shape[-1]):
-        xe_values = [x[j, d] * v for i, j, v in zip(sparse_h.row, sparse_h.col, sparse_h.data)]
-        xe.append(sparse.coo_matrix((xe_values, (sparse_h.row, sparse_h.col)), shape=(m, n)))
-        ymax.append(np.zeros(len(rank)))
-        ymin.append(np.zeros(len(rank)))
-        k = 0
-        for i, r in enumerate(rank):
-            ymax[d][i] = np.max([x[he[j], d] for j in range(k, k+int(r))])
-            ymin[d][i] = np.min([x[he[j], d] for j in range(k, k+int(r))])
-            # if i == 20:
-            #     print(ymax[d][i], ymin[d][i])
-            #     print([x[he[j], d] for j in range(k, k+int(r))])
-            #     input()
-            k += int(r)
-        y.append(np.array(ymin[d] + (ymax[d] - ymin[d]) / 2).squeeze())
-        ymax_values = np.array([ymax[d][i] * v for i, j, v in zip(sparse_h.row, sparse_h.col, sparse_h.data)])
-        ymin_values = np.array([ymin[d][i] * v for i, j, v in zip(sparse_h.row, sparse_h.col, sparse_h.data)])
-        # y_values = ymin_values + (ymax_values - ymin_values) / 2
-        x_argmax_values = (xe_values == ymax_values).astype(int)
-        x_argmin_values = (xe_values == ymin_values).astype(int)
-        x_d_values = x_argmax_values + x_argmin_values
-        x_d_coo = sparse.coo_matrix((x_d_values, (sparse_h.row, sparse_h.col)), shape=(m, n))
-        x_d.append(np.array(np.abs(x_d_coo).sum(axis=0)).squeeze())
-        x_d[d][x_d[d] == 0] = 1
-        actual_sparse_h = sparse.coo_matrix((sparse_h.data * (x_argmax_values + x_argmin_values), (sparse_h.row, sparse_h.col)), shape=(m, n))
-        gradient.append(np.subtract(x[:, d] - s[:, d], ((actual_sparse_h.T @ y[d]).T / x_d[d]).T))
-
-    gradient = np.array(gradient).T
-    y = np.array(y).T
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=np.inf)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 - np.linalg.norm(x.T @ s, ord=2)
-    return gradient, y, fx
-
-
-def nonvectorized_infinity(x, s, sparse_h, rank, W, D):
-    hypergraph = []
-    he = sparse_h.col
-    k = 0
-    for r in rank:
-        hypergraph.append([he[j] for j in range(k, k + int(r))])
-        k += int(r)
-    gradient = np.zeros(x.shape)
-    #degree = np.zeros(x.shape)
-    degree = np.array(D)
-    y = np.zeros((len(rank), x.shape[-1]))
-    fx = 0
-    for i, e in enumerate(hypergraph):
-        xe = x[e]
-        de = degree[e]
-        y_max = xe.max(axis=0)
-        y_min = xe.min(axis=0)
-        y[i, :] = y_min + (y_max - y_min) / 2
-        argmax = (xe == y_max)
-        argmin = (xe == y_min)
-        # degree[e] += (argmax | argmin) * W[i, i]
-        maxmult = argmax.astype(int)
-        minmult = argmin.astype(int)
-        gradient[e] += W[i, i] * np.einsum('ij,i,ij->ij', xe - y[i, :], de, maxmult / (de @ maxmult) + minmult / (de @ minmult))
-        # The following line performs slightly better, but the above line is cleaner
-        # and used np.einsum, therefore it is OBVIOUSLY better
-        # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
-        fx += np.linalg.norm(y[i, :] - y_min, ord=np.inf)
-    # degree[degree == 0] = 1
-    gradient = (gradient.T / D).T
-    gradient -= (s.T / D).T
-    # fx -= np.einsum('ij,ij->', x, s)
-    return gradient, y, fx
 
 
 diffusion_functions = OrderedDict([

@@ -46,25 +46,47 @@ def read_seed(filename, labels, dimensions, D):
 def read_hypergraph(filename):
     """Read a hypergraph and return n, m and a list of participating nodes"""
     with open(filename) as f:
+        node_weights = None
         weights = None
+        center_id = None
+        hypergraph_node_weights = None
         first_line = [int(i) for i in f.readline().split()]
         m, n = first_line[:2]
         fmt = first_line[2] if len(first_line) > 2 else 0
-        if fmt % 10 == 1:
+        has_edge_weights = fmt % 10 == 1
+        has_node_weights = (fmt // 10) % 10 == 1
+        hyperedge_has_node_weights = (fmt // 100) % 10 == 1
+        has_hyperedge_centers = (fmt // 1000) % 10 == 1
+        if has_edge_weights:
             weights = {}
+        if has_hyperedge_centers:
+            center_id = {}
+        if hyperedge_has_node_weights:
+            hypergraph_node_weights = {}
         hypergraph = []
         for _ in range(m):
             start = 0
             line = f.readline().split()
-            if fmt % 10 == 1:
-                w = float(line[0])
-                start = 1
-            hypergraph.append(tuple([int(i) - 1 for i in line[start:]]))
-            if fmt % 10 == 1:
+            if has_edge_weights:
+                w = float(line[start])
+                start += 1
+            if has_hyperedge_centers:
+                c_ind = int(line[start]) - 1
+                start += 1
+            if hyperedge_has_node_weights:
+                nodes = tuple([int(i) - 1 for i in line[start::2]])
+                hyperedge_node_weights = [float(i) for i in line[start + 1::2]]
+                hypergraph_node_weights[nodes] = hyperedge_node_weights
+            else:
+                nodes = tuple([int(i) - 1 for i in line[start:]])
+            hypergraph.append(nodes)
+            if has_edge_weights:
                 weights[hypergraph[-1]] = w
-        if fmt // 10 == 1:
-            degree = [float(f.readline()) for _ in range(n)]
-    return n, m, degree, hypergraph, weights
+            if has_hyperedge_centers:
+                center_id[hypergraph[-1]] = c_ind
+        if has_node_weights:
+            node_weights = [float(f.readline()) for _ in range(n)]
+    return n, m, node_weights, hypergraph, weights, center_id, hypergraph_node_weights
 
 
 def read_labels(filename):
