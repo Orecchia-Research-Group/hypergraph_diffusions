@@ -183,6 +183,18 @@ def vec_to_list(node_df, vec):
 	idxs = list(np.reshape(idxs,newshape=idxs.size))
 	
 	return node_df['business_id'].loc[node_df['node_idx'].isin(idxs)].unique()
+
+"""
+ASSESSING PERFORMANCE
+
+"""
+
+def find_sweep_cut(node_df, node_vec, threshold):
+	restaurants_above_threshold = vec_to_list(node_df, node_vec > threshold)
+
+	return node_df['business_id'].loc[node_df['business_id'].isin(restaurants_above_threshold)]
+
+
 """
 PLOTTING
 
@@ -338,6 +350,8 @@ def main(target_city = 'New Orleans', s_vector = None, hypergraph_objective = di
 		os.makedirs(save_path)
 		with open(save_path+"/diffusion_results.pkl","wb") as fp:
 			pickle.dump(diffusion_results, fp)
+
+		saved_args['node_df'] = node_df
 		with open(save_path+"/experiment_parameters.pkl","wb") as fp:
 			# we can't save the objective function
 			del saved_args['hypergraph_objective']
