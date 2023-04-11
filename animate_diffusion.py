@@ -23,9 +23,10 @@ import reading
 
 STEP_SIZE = 1e-1
 EPS = 1e-6
+SAVE_FOLDER = 'results'
 
 
-def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names, labels, screenshots, pos=None):
+def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names, labels, screenshots, save_folder=SAVE_FOLDER, pos=None):
     """Animate the results of a diffusion"""
     fig = plt.figure()
     graph_ax = plt.subplot2grid((5, 1), (0, 0), rowspan=4)
@@ -118,7 +119,7 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
     for i, fr in enumerate(frame_saves):
         screenshot_filename = f'{graph_name}_{diffusion_function}_diffusion_{i:03d}.png'
         animate(fr)
-        fig.savefig(screenshot_filename, bbox_inches='tight', dpi=500)
+        fig.savefig(os.path.join(save_folder, screenshot_filename), bbox_inches='tight', dpi=500)
 
     fig.canvas.mpl_connect('key_press_event', onClick)
     ani = FuncAnimation(fig, animate, frames=generate_frame, interval=40, repeat=True, repeat_delay=1500, save_count=T)
@@ -137,6 +138,7 @@ def train(x, y, label_names, verbose=0):
         fig = plt.Figure()
         plot_confusion_matrix(clf, x_test, y_test, display_labels=label_names, values_format='d')
         plt.show()
+    return clf, x_test, y_test, y_pred
 
 
 def parse_args():
@@ -153,6 +155,7 @@ def parse_args():
     parser.add_argument('-x', help='Filename to read initial x_0 from. Ignores dimensions.', type=str, default=None)
     parser.add_argument('--no-plot', help='Skip plotting to focus with classification.', action='store_true')
     parser.add_argument('--no-save', help='Disable saving the animation. Results in faster completion time.', action='store_true')
+    parser.add_argument('--save-folder', help='Folder to save pictures.', default=SAVE_FOLDER)
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
     parser.add_argument('--screenshots', help='How many screenshots of the animation to save.', default=0, type=int)
     parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=None)
@@ -179,7 +182,7 @@ def main():
     if args.random_seed is None:
         args.random_seed = np.random.randint(1000000)
     np.random.seed(args.random_seed)
-    x0 = reading.read_positions(args.x)
+    x0 = reading.read_positions(args.x, n, args.dimensions)
     if x0 is not None:
         args.dimensions = len(x0[0])
     else:
@@ -188,7 +191,7 @@ def main():
     if len(label_names) == 0:
         label_names = ['Nodes']
         labels = [0] * n
-    pos = reading.read_positions(args.position)
+    pos = reading.read_positions(args.position, n, args.dimensions)
     s = reading.read_seed(args.seed, labels, args.dimensions, node_weights)
 
     if args.verbose > 0:
@@ -203,9 +206,10 @@ def main():
     if args.confusion:
         train(x[-1], labels, label_names, verbose=args.verbose)
     if not args.no_plot:
-        ani = animate_diffusion(graph_name, args.function, node_weights, x, fx, label_names, labels, args.screenshots, pos=pos)
+        ani = animate_diffusion(graph_name, args.function, node_weights, x, fx, label_names, labels,
+                                args.screenshots, pos=pos, save_folder=args.save_folder)
         if not args.no_save:
-            ani.save(f'{graph_name}_{args.function}_diffusion.gif', writer='imagemagick', fps=10)
+            ani.save(os.path.join(args.save_folder, f'{graph_name}_{args.function}_diffusion.gif'), writer='imagemagick', fps=10)
         plt.show()
 
 
