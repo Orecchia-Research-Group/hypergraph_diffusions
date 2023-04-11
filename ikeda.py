@@ -60,6 +60,21 @@ def plot_hist(results):
     ax.set_zlabel('# of results')
 
 
+def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, f, s, alpha, verbose=0):
+    fx = np.zeros(x.shape[0])
+    if verbose > 0:
+        print(f'{"Time (s)":8s} {"t":5s}')
+    start_time = time.time()
+    for t in range(iterations):
+        if verbose > 0:
+            print(f'{time.time() - start_time:8.3f} {t:5d}', end='\r')
+        _, _, fx[t] = func(x[t], sparse_h, rank, W, node_weights)
+        _, fx[t] = added_terms(x[t], np.zeros_like(x[0]), fx[t], node_weights, f, s, 2 * alpha / (1 + alpha))
+    if verbose > 0:
+        print()
+    return fx
+
+
 def parse_args():
     """Parse arguments"""
     parser = argparse.ArgumentParser(prog='Ikeda Practical Evaluation',
@@ -73,6 +88,7 @@ def parse_args():
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
     parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=20)
     parser.add_argument('--alpha', '-a', help='Parameter used in personalized pagerank.', type=float, default=0)
+    parser.add_argument('-e', '--eta', help='Exponential averaging parameter.', type=float, default=0.9)
     parser.add_argument('--save-folder', help='Folder to save pictures.', default=SAVE_FOLDER)
     parser.add_argument('--no-sweep', help='Disable doing sweep cuts.', action='store_true')
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
@@ -112,40 +128,41 @@ def main():
 
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     x_cs = np.cumsum(x, axis=0)
-    fx_cs = np.zeros(fx.shape)
     if args.verbose > 0:
         print('Computing function values averaging over t')
-        print(f'{"Time (s)":8s} {"t":>5s}')
-    start_time = time.time()
     for t in range(args.iterations):
-        if args.verbose > 0:
-            print(f'{time.time() - start_time:8.3f} {t:5d}', end='\r')
         x_cs[t] /= (t + 1)
-        _, _, fx_cs[t] = func(x_cs[t], sparse_h, rank, W, node_weights)
-        _, fx_cs[t] = added_terms(x_cs[t], np.zeros_like(x0), fx_cs[t], node_weights, np.zeros_like(x0), x0, 2 * args.alpha / (1 + args.alpha))
-    if args.verbose > 0:
-        print()
+    fx_cs = get_function_values(x_cs, func, args.iterations, sparse_h, rank, W, node_weights,
+                                np.zeros_like(x0), x0, args.alpha, args.verbose)
 
     final_x = np.zeros_like(x)
-    final_fx = np.zeros_like(fx)
     if args.verbose > 0:
-        print('Computing function values averaging over t')
-        print(f'{"Time (s)":8s} {"t":5s}')
-    start_time = time.time()
+        print('Computing function values tail averaging over t')
     for t in range(args.iterations):
-        if args.verbose > 0:
-            print(f'{time.time() - start_time:8.3f} {t:5d}', end='\r')
         final_x[t] = (x_cs[-1] * args.iterations - x_cs[t - 1] * t) / (args.iterations - t)
-        _, _, final_fx[t] = func(final_x[t], sparse_h, rank, W, node_weights)
-        _, final_fx[t] = added_terms(final_x[t], np.zeros_like(x0), final_fx[t], node_weights,
-                                                         np.zeros_like(x0), x0, 2 * args.alpha / (1 + args.alpha))
+    final_fx = get_function_values(final_x, func, args.iterations, sparse_h, rank, W, node_weights,
+                                   np.zeros_like(x0), x0, args.alpha, args.verbose)
+
+    exp_x = np.zeros_like(x)
+    exp_x[0] = x0
     if args.verbose > 0:
-        print()
-        print(f'Min values\n\n{"Last iterate":20s} = {fx.min() / x.shape[-1]:10.6f}\n{"Averaging":20s} = {fx_cs.min() / x.shape[-1]:10.6f}\n{"Tail Averaging":20s} = {final_fx.min() / x.shape[-1]:10.6f}')
+        print('Computing function values with exponential weight averaging over t')
+    for t in range(1, args.iterations):
+        exp_x[t] = (exp_x[t-1] * args.eta + x[t]) / (1 + args.eta)
+    exp_fx = get_function_values(exp_x, func, args.iterations, sparse_h, rank, W, node_weights,
+                                 np.zeros_like(x0), x0, args.alpha, args.verbose)
+
+    if args.verbose > 0:
+        print('Min values')
+        print(f'{"Last iterate":20s} = {fx.min() / x.shape[-1]:10.6f}')
+        print(f'{"Averaging":20s} = {fx_cs.min() / x.shape[-1]:10.6f}')
+        print(f'{"Tail Averaging":20s} = {final_fx.min() / x.shape[-1]:10.6f}')
+        print(f'{"Exponential Averaging":20s} = {exp_fx.min() / x.shape[-1]:10.6f}')
 
     plt.plot(fx / x.shape[-1], label='Last iterate')
     plt.plot(fx_cs / x.shape[-1], label='Average iterate')
     plt.plot(final_fx / x.shape[-1], label='Average tail iterate')
+    plt.plot(exp_fx / x.shape[-1], label='Exponential average iterate')
     plt.legend(loc='best')
     plt.xlabel('t')
     plt.ylabel('Q(x)')
