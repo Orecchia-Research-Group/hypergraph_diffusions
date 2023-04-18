@@ -3,6 +3,7 @@
 import os
 import argparse
 import time
+import pickle
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -61,7 +62,7 @@ def plot_hist(results):
 
 
 def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, f, s, alpha, verbose=0):
-    fx = np.zeros(x.shape[0])
+    fx = np.zeros((x.shape[0], x.shape[-1]))
     if verbose > 0:
         print(f'{"Time (s)":8s} {"t":5s}')
     start_time = time.time()
@@ -91,6 +92,7 @@ def parse_args():
     parser.add_argument('-e', '--eta', help='Exponential averaging parameter.', type=float, default=0.9)
     parser.add_argument('--save-folder', help='Folder to save pictures.', default=SAVE_FOLDER)
     parser.add_argument('--no-sweep', help='Disable doing sweep cuts.', action='store_true')
+    parser.add_argument('--write-values', help='Save all values in a pickle file based on the arguments in the save folder.', action='store_true')
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     args = parser.parse_args()
     return args
@@ -119,11 +121,11 @@ def main():
         results = conductance.min(axis=2)
 
         plot_surf(results)
-        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}.png'), dpi=300)
+        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}.png'), dpi=300)
         plt.show()
 
         plot_hist(results)
-        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_hist.png'), dpi=300)
+        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}_hist.png'), dpi=300)
         plt.show()
 
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
@@ -148,26 +150,39 @@ def main():
     if args.verbose > 0:
         print('Computing function values with exponential weight averaging over t')
     for t in range(1, args.iterations):
-        exp_x[t] = (exp_x[t-1] * args.eta + x[t]) / (1 + args.eta)
+        exp_x[t] = exp_x[t-1] * args.eta + x[t] * (1 - args.eta)
     exp_fx = get_function_values(exp_x, func, args.iterations, sparse_h, rank, W, node_weights,
                                  np.zeros_like(x0), x0, args.alpha, args.verbose)
 
     if args.verbose > 0:
         print('Min values')
-        print(f'{"Last iterate":20s} = {fx.min() / x.shape[-1]:10.6f}')
-        print(f'{"Averaging":20s} = {fx_cs.min() / x.shape[-1]:10.6f}')
-        print(f'{"Tail Averaging":20s} = {final_fx.min() / x.shape[-1]:10.6f}')
-        print(f'{"Exponential Averaging":20s} = {exp_fx.min() / x.shape[-1]:10.6f}')
+        print(f'{"Last iterate":20s} = {fx.min():10.6f}')
+        print(f'{"Averaging":20s} = {fx_cs.min():10.6f}')
+        print(f'{"Tail Averaging":20s} = {final_fx.min():10.6f}')
+        print(f'{"Exponential Averaging":20s} = {exp_fx.min():10.6f}')
 
-    plt.plot(fx / x.shape[-1], label='Last iterate')
-    plt.plot(fx_cs / x.shape[-1], label='Average iterate')
-    plt.plot(final_fx / x.shape[-1], label='Average tail iterate')
-    plt.plot(exp_fx / x.shape[-1], label='Exponential average iterate')
+    plt.plot(fx.min(axis=1), label='Last iterate')
+    plt.plot(fx_cs.min(axis=1), label='Average iterate')
+    plt.plot(final_fx.min(axis=1), label='Average tail iterate')
+    plt.plot(exp_fx.min(axis=1), label='Exponential average iterate')
     plt.legend(loc='best')
     plt.xlabel('t')
     plt.ylabel('Q(x)')
-    plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_value.png'), dpi=300)
-    plt.show()
+    plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}_value.png'), dpi=300)
+    # plt.show()
+    if args.write_values:
+        pickle_filename = os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}.pickle')
+        with open(pickle_filename, 'wb') as fp:
+            pickle.dump({
+                'x': x,
+                'fx': fx,
+                'x_cs': x_cs,
+                'fx_cs': fx_cs,
+                'final_x': final_x,
+                'final_fx': final_fx,
+                'exp_x': exp_x,
+                'exp_fx': exp_fx,
+            }, fp)
 
 
 if __name__ == '__main__':
