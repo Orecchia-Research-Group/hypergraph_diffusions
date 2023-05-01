@@ -6,12 +6,69 @@ A set of diffusion functions over hypergraphs
 
 from datetime import datetime
 from collections import OrderedDict, defaultdict, Counter
+from functools import partial
 import numpy as np
 from scipy import sparse
+from scipy.sparse.linalg import bicgstab
 
 
 EPS = 1e-6
 H = 0.1
+
+
+def degree_regularizer(D, gradient):
+    """Reguralizer is the square matrix D, but we pass tr(D) as a list."""
+    return (gradient.T / D).T
+
+
+def clique_regularizer(L, gradient):
+    """The clique expansion should closely resemble the other cut functions"""
+    result = np.zeros_like(gradient)
+    for i in range(gradient.shape[1]):
+        res, info = bicgstab(L, gradient[:, i])
+        # print(info)
+        result[:, i] = res
+    return result
+
+
+def make_degree_regularizer(n, m, D, hypergraph, weights):
+    return partial(degree_regularizer, D), sparse.diags(D)
+
+
+def make_clique_regularizer(n, m, D, hypergraph, weights):
+    clique_weights = defaultdict(float)
+    for e in hypergraph:
+        w = weights[e]
+        h = len(e)
+        for i in e:
+            clique_weights[(i, i)] += w
+            for j in e:
+                clique_weights[(i, j)] -= w / h
+    for i, j in clique_weights.keys():
+        if i == j:
+            clique_weights[(i, i)] += EPS
+    data = []
+    row = []
+    col = []
+    for (i, j), w in clique_weights.items():
+        data.append(w)
+        row.append(i)
+        col.append(j)
+    L = sparse.coo_matrix((data, (row, col)), shape=(n, n))
+    return partial(clique_regularizer, L), L
+
+
+regularizers = {
+    'degree': make_degree_regularizer,
+    'clique': make_clique_regularizer,
+}
+
+
+def make_regularizer(reg_string, n, m, D, hypergraph, weights):
+    """Given a regularizer description and the hypergraph create a preconditioner function"""
+    if weights is None:
+        weights = defaultdict(lambda: 1)
+    return regularizers[reg_string](n, m, D, hypergraph, weights)
 
 
 # FUCK numpy for not supporting weighted norms
@@ -137,29 +194,31 @@ def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_n
         # has not added hyperedge node weights below
         # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
         fx += np.linalg.norm(dist, ord=np.inf, axis=0)
-    gradient = (gradient.T / D).T
+    # gradient = (gradient.T / D).T
     # degree[degree == 0] = 1
     # fx -= np.einsum('ij,ij->', x, s)
     return gradient, y, fx
 
 
-def added_terms(x, gradient, fx, D, f, s=None, beta=0):
+def added_terms(x, gradient, fx, R, f, s=None, beta=0):
     # print(gradient.shape)
     # print(f.shape)
     # print(D.shape)
-    gradient -= (f.T / D).T
+    gradient -= f
     if beta != 0:
         gradient *= (1 - beta)
-        gradient += beta * (x - s) / 2
+        gradient += beta * (R @ (x - s))
         fx *= (1 - beta)
-        fx += beta * ((x - s) ** 2).sum(axis=0) / 2
+        fx += beta * ((R @ (x - s)) * (x - s)).sum(axis=0) / 2
     return gradient, fx
 
 
 def diffusion(x0, n, m, D, hypergraph, weights, s=None, alpha=None, center_id=None, hypergraph_node_weights=None,
-              func=nonvectorized_infinity, f=None, h=H, T=None, eps=EPS, verbose=0):
+              func=nonvectorized_infinity, f=None, h=H, T=None, eps=EPS, regularizer=tuple(regularizers.keys())[0], verbose=0):
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     x = [np.array(x0)]
+
+    # Personalized PageRank (PPR)
     if f is None:
         f = np.zeros(shape=x[-1].shape)
     if alpha is None or alpha == 0:
@@ -167,6 +226,9 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, alpha=None, center_id=No
         beta = 0
     else:
         beta = 2 * alpha / (1 + alpha)
+
+    # Figure out regularizer
+    precond_func, R = make_regularizer(regularizer, n, m, D, hypergraph, weights)
 
     if verbose > 0:
         print(f'Average degree = {sum(D) / n:.3f}. Average rank = {sum(rank) / m:.3f}')
@@ -176,26 +238,27 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, alpha=None, center_id=No
     crit = 1
     t = 1
     t_start = datetime.now()
+    iteration_times = []
     print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     while (len(x) < 2 or crit > eps) and (T is None or t < T):
         partial_gradient, new_y, partial_new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-        gradient, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D, f, s, beta)
+        gradient, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, R, f, s, beta)
         y.append(new_y)
         fx.append(new_fx)
+        iteration_times.append((datetime.now() - t_start).total_seconds())
         if verbose > 0:
-            t_now = datetime.now()
-            print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f} {np.abs(gradient).min():10.6f}', end='')
-        x.append(x[-1] - h * gradient)
-        crit = np.linalg.norm((D * (x[-1] - x[-2]).T) @ (x[-1] - x[-2]))
+            print(f'\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f} {np.abs(gradient).min():10.6f}', end='')
+        x.append(x[-1] - h * precond_func(gradient))
+        crit = ((R @ (x[-1] - x[-2])) * (x[-1] - x[-2])).sum(axis=0).max() / 2
         t += 1
     partial_gradient, new_y, partial_new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-    _, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D, f, s, beta)
+    _, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, R, f, s, beta)
     y.append(new_y)
     fx.append(new_fx)
     if verbose > 0:
         t_now = datetime.now()
         print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}')
-    return np.array(x), np.array(y), np.array(fx)
+    return np.array(iteration_times), np.array(x), np.array(y), np.array(fx)
 
 
 def sweep_cut(x, n, m, D, hypergraph, weights=None, center_id=None, hypergraph_node_weights=None):

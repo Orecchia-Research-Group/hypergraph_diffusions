@@ -11,7 +11,7 @@ from matplotlib import cm
 from mpl_toolkits.mplot3d import Axes3D
 
 import reading
-from diffusion_functions import diffusion_functions, diffusion, all_sweep_cuts, added_terms, compute_hypergraph_matrices
+from diffusion_functions import diffusion_functions, diffusion, all_sweep_cuts, added_terms, compute_hypergraph_matrices, regularizers
 
 SAVE_FOLDER = 'results'
 STEP_SIZE = 1
@@ -66,7 +66,7 @@ def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, f,
     if verbose > 0:
         print(f'{"Time (s)":8s} {"t":5s}')
     start_time = time.time()
-    for t in range(iterations):
+    for t in range(fx.shape[0]):
         if verbose > 0:
             print(f'{time.time() - start_time:8.3f} {t:5d}', end='\r')
         _, _, fx[t] = func(x[t], sparse_h, rank, W, node_weights)
@@ -90,6 +90,7 @@ def parse_args():
     parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=20)
     parser.add_argument('--alpha', '-a', help='Parameter used in personalized pagerank.', type=float, default=0)
     parser.add_argument('-e', '--eta', help='Exponential averaging parameter.', type=float, default=0.9)
+    parser.add_argument('--regularizer', help='Preconditioner for hypergraph diffusion', choices=regularizers.keys(), default=tuple(regularizers.keys())[0])
     parser.add_argument('--save-folder', help='Folder to save pictures.', default=SAVE_FOLDER)
     parser.add_argument('--no-sweep', help='Disable doing sweep cuts.', action='store_true')
     parser.add_argument('--write-values', help='Save all values in a pickle file based on the arguments in the save folder.', action='store_true')
@@ -113,26 +114,26 @@ def main():
     x0 = np.zeros((n, args.dimensions))
     for d, v in enumerate(vs):
         x0[v, d] = 1
-    x, _, fx = diffusion(x0, n, m, node_weights, hypergraph, weights, s=x0, alpha=args.alpha, center_id=center_id,
+    iteration_times, x, _, fx = diffusion(x0, n, m, node_weights, hypergraph, weights, s=x0, alpha=args.alpha, center_id=center_id,
                          hypergraph_node_weights=hypergraph_node_weights, func=func,
-                         h=args.step_size, T=args.iterations, verbose=args.verbose)
+                         h=args.step_size, T=args.iterations, regularizer=args.regularizer, verbose=args.verbose)
     if not args.no_sweep:
         value, volume, conductance = all_sweep_cuts(x, n, m, node_weights, hypergraph, args.verbose)
         results = conductance.min(axis=2)
 
         plot_surf(results)
-        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}.png'), dpi=300)
+        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}.png'), dpi=300)
         plt.show()
 
         plot_hist(results)
-        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}_hist.png'), dpi=300)
+        plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}_hist.png'), dpi=300)
         plt.show()
 
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     x_cs = np.cumsum(x, axis=0)
     if args.verbose > 0:
         print('Computing function values averaging over t')
-    for t in range(args.iterations):
+    for t in range(x.shape[0]):
         x_cs[t] /= (t + 1)
     fx_cs = get_function_values(x_cs, func, args.iterations, sparse_h, rank, W, node_weights,
                                 np.zeros_like(x0), x0, args.alpha, args.verbose)
@@ -140,7 +141,7 @@ def main():
     final_x = np.zeros_like(x)
     if args.verbose > 0:
         print('Computing function values tail averaging over t')
-    for t in range(args.iterations):
+    for t in range(x.shape[0]):
         final_x[t] = (x_cs[-1] * args.iterations - x_cs[t - 1] * t) / (args.iterations - t)
     final_fx = get_function_values(final_x, func, args.iterations, sparse_h, rank, W, node_weights,
                                    np.zeros_like(x0), x0, args.alpha, args.verbose)
@@ -149,7 +150,7 @@ def main():
     exp_x[0] = x0
     if args.verbose > 0:
         print('Computing function values with exponential weight averaging over t')
-    for t in range(1, args.iterations):
+    for t in range(1, x.shape[0]):
         exp_x[t] = exp_x[t-1] * args.eta + x[t] * (1 - args.eta)
     exp_fx = get_function_values(exp_x, func, args.iterations, sparse_h, rank, W, node_weights,
                                  np.zeros_like(x0), x0, args.alpha, args.verbose)
@@ -161,26 +162,23 @@ def main():
         print(f'{"Tail Averaging":20s} = {final_fx.min():10.6f}')
         print(f'{"Exponential Averaging":20s} = {exp_fx.min():10.6f}')
 
-    plt.plot(fx.min(axis=1), label='Last iterate')
-    plt.plot(fx_cs.min(axis=1), label='Average iterate')
-    plt.plot(final_fx.min(axis=1), label='Average tail iterate')
-    plt.plot(exp_fx.min(axis=1), label='Exponential average iterate')
+    plt.plot(np.median(fx, axis=1), label='Last iterate')
+    plt.plot(np.median(fx_cs, axis=1), label='Average iterate')
+    plt.plot(np.median(final_fx, axis=1), label='Average tail iterate')
+    plt.plot(np.median(exp_fx, axis=1), label='Exponential average iterate')
     plt.legend(loc='best')
     plt.xlabel('t')
     plt.ylabel('Q(x)')
-    plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}_value.png'), dpi=300)
+    plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}_value.png'), dpi=300)
     # plt.show()
     if args.write_values:
-        pickle_filename = os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{100 * args.alpha:.0f}.pickle')
+        pickle_filename = os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}.pickle')
         with open(pickle_filename, 'wb') as fp:
             pickle.dump({
-                'x': x,
+                't': iteration_times,
                 'fx': fx,
-                'x_cs': x_cs,
                 'fx_cs': fx_cs,
-                'final_x': final_x,
                 'final_fx': final_fx,
-                'exp_x': exp_x,
                 'exp_fx': exp_fx,
             }, fp)
 
