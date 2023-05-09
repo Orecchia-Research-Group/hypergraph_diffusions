@@ -137,7 +137,7 @@ def main():
         x_cs[t] /= (t + 1)
     fx_cs = get_function_values(x_cs, func, args.iterations, sparse_h, rank, W, node_weights,
                                 np.zeros_like(x0), x0, args.alpha, args.verbose)
-
+    """
     final_x = np.zeros_like(x)
     if args.verbose > 0:
         print('Computing function values tail averaging over t')
@@ -145,7 +145,7 @@ def main():
         final_x[t] = (x_cs[-1] * args.iterations - x_cs[t - 1] * t) / (args.iterations - t)
     final_fx = get_function_values(final_x, func, args.iterations, sparse_h, rank, W, node_weights,
                                    np.zeros_like(x0), x0, args.alpha, args.verbose)
-
+    """
     exp_x = np.zeros_like(x)
     exp_x[0] = x0
     if args.verbose > 0:
@@ -159,13 +159,13 @@ def main():
         print('Min values')
         print(f'{"Last iterate":20s} = {fx.min():10.6f}')
         print(f'{"Averaging":20s} = {fx_cs.min():10.6f}')
-        print(f'{"Tail Averaging":20s} = {final_fx.min():10.6f}')
+        # print(f'{"Tail Averaging":20s} = {final_fx.min():10.6f}')
         print(f'{"Exponential Averaging":20s} = {exp_fx.min():10.6f}')
 
-    plt.plot(np.median(fx, axis=1), label='Last iterate')
-    plt.plot(np.median(fx_cs, axis=1), label='Average iterate')
-    plt.plot(np.median(final_fx, axis=1), label='Average tail iterate')
-    plt.plot(np.median(exp_fx, axis=1), label='Exponential average iterate')
+    plt.plot(np.min(fx, axis=1), label='Last iterate')
+    plt.plot(np.min(fx_cs, axis=1), label='Average iterate')
+    # plt.plot(np.min(final_fx, axis=1), label='Average tail iterate')
+    plt.plot(np.min(exp_fx, axis=1), label='Exponential average iterate')
     plt.legend(loc='best')
     plt.xlabel('t')
     plt.ylabel('Q(x)')
@@ -176,9 +176,12 @@ def main():
         with open(pickle_filename, 'wb') as fp:
             pickle.dump({
                 't': iteration_times,
+                'x': x[-1],
+                'x_cs': x_cs[-1],
+                'exp_x': exp_x[-1],
                 'fx': fx,
                 'fx_cs': fx_cs,
-                'final_fx': final_fx,
+                # 'final_fx': final_fx,
                 'exp_fx': exp_fx,
             }, fp)
 
