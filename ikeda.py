@@ -103,6 +103,12 @@ def main():
     """Driver"""
     args = parse_args()
     graph_name = os.path.basename(os.path.splitext(args.hypergraph)[0])
+    if args.write_values:
+        pickle_filename = os.path.join(args.save_folder,
+                                       f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}.pickle')
+        if os.path.isfile(pickle_filename):
+            print("Pickle file exists. Exiting...")
+            return
     if args.verbose > 0:
         print(f'Reading hypergraph from file {args.hypergraph}')
     func = diffusion_functions['infinity']
