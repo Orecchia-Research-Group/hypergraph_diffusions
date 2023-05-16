@@ -200,11 +200,9 @@ def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_n
     return gradient, y, fx
 
 
-def added_terms(x, gradient, fx, D, f, s=None, beta=0):
-    # print(gradient.shape)
-    # print(f.shape)
-    # print(D.shape)
+def added_terms(x, gradient, fx, D, s, f, beta):
     gradient -= f
+    fx -= (x * f).sum(axis=0)
     if beta != 0:
         gradient *= (1 - beta)
         gradient += beta * (D @ (x - s))
@@ -213,8 +211,8 @@ def added_terms(x, gradient, fx, D, f, s=None, beta=0):
     return gradient, fx
 
 
-def diffusion(x0, n, m, D, hypergraph, weights, s=None, alpha=None, center_id=None, hypergraph_node_weights=None,
-              func=nonvectorized_infinity, f=None, h=H, T=None, eps=EPS, regularizer=tuple(regularizers.keys())[0], verbose=0):
+def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=None, center_id=None, hypergraph_node_weights=None,
+              func=nonvectorized_infinity, h=H, T=None, eps=EPS, regularizer=tuple(regularizers.keys())[0], verbose=0):
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     x = [np.array(x0)]
     x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
@@ -222,15 +220,11 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, alpha=None, center_id=No
     D_mat = sparse.diags(D)
 
     # Personalized PageRank (PPR)
-    if f is None:
-        f = np.zeros(shape=x[-1].shape)
-    if alpha is None or alpha == 0:
-        s = None
-        beta = 0
+    if lamda is None or lamda == 0:
+        s = np.zeros_like(x0)
     else:
-        beta = 2 * alpha / (1 + alpha)
-        s -= (D * s.T).T.sum(axis=0) / sum(D)
-        s -= (D * s.T).T.sum(axis=0) / sum(D)
+        s -= s.sum(axis=0) / n
+        s -= s.sum(axis=0) / n
 
     # Figure out regularizer
     precond_func, R = make_regularizer(regularizer, n, m, D, hypergraph, weights)
@@ -246,19 +240,28 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, alpha=None, center_id=No
     iteration_times = [0]
     print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     while (len(x) < 2 or crit > eps) and (T is None or t < T):
-        partial_gradient, new_y, partial_new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-        gradient, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
-        gradient -= gradient.sum(axis=0) / n
+        gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
+        print('\n', abs(np.einsum('i,ij->j', D, gradient)).sum(), abs(gradient.sum(axis=0)).sum())
+        gradient -= s
+        gradient += (D * x[-1].T).T * lamda / 2
+        new_fx -= (x[-1] * s).sum(axis=0)
+        new_fx += ((D * x[-1].T).T * x[-1]).sum(axis=0) * lamda / 2
+        # gradient, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
+        # gradient -= gradient.sum(axis=0) / n
         y.append(new_y)
         fx.append(new_fx)
         iteration_times.append((datetime.now() - t_start).total_seconds())
         if verbose > 0:
-            print(f'\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f} {np.abs(gradient).min():10.6f}', end='')
+            print(f'\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}', end='')
         x.append(x[-1] - h * precond_func(gradient))
         crit = ((R @ (x[-1] - x[-2])) * (x[-1] - x[-2])).sum(axis=0).max() / 2
         t += 1
-    partial_gradient, new_y, partial_new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-    _, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
+    gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
+    gradient -= s
+    gradient += (D * x[-1].T).T * lamda / 2
+    new_fx -= (x[-1] * s).sum(axis=0)
+    new_fx += ((D * x[-1].T).T * x[-1]).sum(axis=0) * lamda / 2
+    # _, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
     y.append(new_y)
     fx.append(new_fx)
     if verbose > 0:

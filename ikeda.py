@@ -88,7 +88,7 @@ def parse_args():
     parser.add_argument('-r', '--random-seed', help='Random seed to use for initialization.', type=int, default=None)
     parser.add_argument('-d', '--dimensions', help='Number of embedding dimensions.', type=int, default=2)
     parser.add_argument('-T', '--iterations', help='Maximum iterations for diffusion.', type=int, default=20)
-    parser.add_argument('--alpha', '-a', help='Parameter used in personalized pagerank.', type=float, default=0)
+    parser.add_argument('--lamda', '-l', help='Parameter used in personalized pagerank.', type=float, default=0)
     parser.add_argument('-e', '--eta', help='Exponential averaging parameter.', type=float, default=0.9)
     parser.add_argument('--regularizer', help='Preconditioner for hypergraph diffusion', choices=regularizers.keys(), default=tuple(regularizers.keys())[0])
     parser.add_argument('--save-folder', help='Folder to save pictures.', default=SAVE_FOLDER)
@@ -105,7 +105,7 @@ def main():
     graph_name = os.path.basename(os.path.splitext(args.hypergraph)[0])
     if args.write_values:
         pickle_filename = os.path.join(args.save_folder,
-                                       f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}.pickle')
+                                       f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.lamda:.0f}.pickle')
         if os.path.isfile(pickle_filename):
             print("Pickle file exists. Exiting...")
             return
@@ -120,7 +120,7 @@ def main():
     x0 = np.zeros((n, args.dimensions))
     for d, v in enumerate(vs):
         x0[v, d] = 1
-    iteration_times, x, _, fx = diffusion(x0, n, m, node_weights, hypergraph, weights, s=x0, alpha=args.alpha, center_id=center_id,
+    iteration_times, x, _, fx = diffusion(x0, n, m, node_weights, hypergraph, weights, s=x0, lamda=args.lamda, center_id=center_id,
                          hypergraph_node_weights=hypergraph_node_weights, func=func,
                          h=args.step_size, T=args.iterations, regularizer=args.regularizer, verbose=args.verbose)
     if not args.no_sweep:
