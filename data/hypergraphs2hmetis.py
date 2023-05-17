@@ -315,5 +315,9 @@ def main():
         write_labels(label_filename, label_names, labels)
 
 
+def __init__():
+    pass
+
+
 if __name__ == '__main__':
     main()

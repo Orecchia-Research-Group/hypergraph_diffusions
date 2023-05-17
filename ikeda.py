@@ -103,6 +103,9 @@ def parse_args():
 def main():
     """Driver"""
     args = parse_args()
+    if args.verbose > 0:
+        for name, value in vars(args).items():
+            print(f'{name:10s} = {value}')
     graph_name = os.path.basename(os.path.splitext(args.hypergraph)[0])
     if args.write_values:
         pickle_filename = os.path.join(args.save_folder,
