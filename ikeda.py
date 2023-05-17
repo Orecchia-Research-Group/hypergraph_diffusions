@@ -61,7 +61,7 @@ def plot_hist(results):
     ax.set_zlabel('# of results')
 
 
-def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, f, s, alpha, verbose=0):
+def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, s, lamda, verbose=0):
     fx = np.zeros((x.shape[0], x.shape[-1]))
     if verbose > 0:
         print(f'{"Time (s)":8s} {"t":5s}')
@@ -70,7 +70,8 @@ def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, f,
         if verbose > 0:
             print(f'{time.time() - start_time:8.3f} {t:5d}', end='\r')
         _, _, fx[t] = func(x[t], sparse_h, rank, W, node_weights)
-        _, fx[t] = added_terms(x[t], np.zeros_like(x[0]), fx[t], node_weights, f, s, 2 * alpha / (1 + alpha))
+        fx[t] -= (x[t] * s).sum(axis=0)
+        fx[t] += ((node_weights * x[t].T).T * x[t]).sum(axis=0) * lamda / 2
     if verbose > 0:
         print()
     return fx
@@ -118,9 +119,10 @@ def main():
     np.random.seed(args.random_seed)
     vs = np.random.choice(np.arange(n), size=args.dimensions, replace=False)
     x0 = np.zeros((n, args.dimensions))
+    s = np.zeros((n, args.dimensions))
     for d, v in enumerate(vs):
-        x0[v, d] = 1
-    iteration_times, x, _, fx = diffusion(x0, n, m, node_weights, hypergraph, weights, s=x0, lamda=args.lamda, center_id=center_id,
+        s[v, d] = 1
+    iteration_times, x, _, fx = diffusion(x0, n, m, node_weights, hypergraph, weights, s=s, lamda=args.lamda, center_id=center_id,
                          hypergraph_node_weights=hypergraph_node_weights, func=func,
                          h=args.step_size, T=args.iterations, regularizer=args.regularizer, verbose=args.verbose)
     if not args.no_sweep:
@@ -142,7 +144,7 @@ def main():
     for t in range(x.shape[0]):
         x_cs[t] /= (t + 1)
     fx_cs = get_function_values(x_cs, func, args.iterations, sparse_h, rank, W, node_weights,
-                                np.zeros_like(x0), x0, args.alpha, args.verbose)
+                                s, args.lamda, args.verbose)
     """
     final_x = np.zeros_like(x)
     if args.verbose > 0:
@@ -159,7 +161,7 @@ def main():
     for t in range(1, x.shape[0]):
         exp_x[t] = exp_x[t-1] * args.eta + x[t] * (1 - args.eta)
     exp_fx = get_function_values(exp_x, func, args.iterations, sparse_h, rank, W, node_weights,
-                                 np.zeros_like(x0), x0, args.alpha, args.verbose)
+                                 s, args.lamda, args.verbose)
 
     if args.verbose > 0:
         print('Min values')
@@ -168,6 +170,10 @@ def main():
         # print(f'{"Tail Averaging":20s} = {final_fx.min():10.6f}')
         print(f'{"Exponential Averaging":20s} = {exp_fx.min():10.6f}')
 
+    # plt.figure()
+    # plt.plot(fx_cs)
+    # plt.show()
+
     plt.plot(np.min(fx, axis=1), label='Last iterate')
     plt.plot(np.min(fx_cs, axis=1), label='Average iterate')
     # plt.plot(np.min(final_fx, axis=1), label='Average tail iterate')
@@ -175,10 +181,10 @@ def main():
     plt.legend(loc='best')
     plt.xlabel('t')
     plt.ylabel('Q(x)')
-    plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}_value.png'), dpi=300)
+    plt.savefig(os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.lamda:.0f}_value.png'), dpi=300)
     # plt.show()
     if args.write_values:
-        pickle_filename = os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.alpha:.0f}.pickle')
+        pickle_filename = os.path.join(args.save_folder, f'Ikeda_{graph_name}_{args.function}_{args.regularizer}_{100 * args.lamda:.0f}.pickle')
         with open(pickle_filename, 'wb') as fp:
             pickle.dump({
                 't': iteration_times,

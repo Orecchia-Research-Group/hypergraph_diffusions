@@ -193,7 +193,7 @@ def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_n
         # and used np.einsum, therefore it is OBVIOUSLY better
         # has not added hyperedge node weights below
         # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
-        fx += np.linalg.norm(dist, ord=np.inf, axis=0)
+        fx += np.linalg.norm(dist, ord=np.inf, axis=0) / 2
     # gradient = (gradient.T / D).T
     # degree[degree == 0] = 1
     # fx -= np.einsum('ij,ij->', x, s)
@@ -211,20 +211,12 @@ def added_terms(x, gradient, fx, D, s, f, beta):
     return gradient, fx
 
 
-def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=None, center_id=None, hypergraph_node_weights=None,
+def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=0, center_id=None, hypergraph_node_weights=None,
               func=nonvectorized_infinity, h=H, T=None, eps=EPS, regularizer=tuple(regularizers.keys())[0], verbose=0):
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
-    x = [np.array(x0)]
-    x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
-    x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
-    D_mat = sparse.diags(D)
-
-    # Personalized PageRank (PPR)
-    if lamda is None or lamda == 0:
-        s = np.zeros_like(x0)
-    else:
-        s -= s.sum(axis=0) / n
-        s -= s.sum(axis=0) / n
+    # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
+    # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
+    # D_mat = sparse.diags(D)
 
     # Figure out regularizer
     precond_func, R = make_regularizer(regularizer, n, m, D, hypergraph, weights)
@@ -239,11 +231,10 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=None, center_id=No
     t_start = datetime.now()
     iteration_times = [0]
     print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
-    while (len(x) < 2 or crit > eps) and (T is None or t < T):
+    while True:
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-        print('\n', abs(np.einsum('i,ij->j', D, gradient)).sum(), abs(gradient.sum(axis=0)).sum())
         gradient -= s
-        gradient += (D * x[-1].T).T * lamda / 2
+        gradient += (D * x[-1].T).T * lamda
         new_fx -= (x[-1] * s).sum(axis=0)
         new_fx += ((D * x[-1].T).T * x[-1]).sum(axis=0) * lamda / 2
         # gradient, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
@@ -253,20 +244,16 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=None, center_id=No
         iteration_times.append((datetime.now() - t_start).total_seconds())
         if verbose > 0:
             print(f'\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}', end='')
-        x.append(x[-1] - h * precond_func(gradient))
+        new_x = x[-1] - h * precond_func(gradient)
+        if (len(x) > 2 and crit <= eps) or (T is not None and t >= T):
+            if verbose > 0:
+                t_now = datetime.now()
+                print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}')
+            break
+        x.append(new_x)
         crit = ((R @ (x[-1] - x[-2])) * (x[-1] - x[-2])).sum(axis=0).max() / 2
         t += 1
-    gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-    gradient -= s
-    gradient += (D * x[-1].T).T * lamda / 2
-    new_fx -= (x[-1] * s).sum(axis=0)
-    new_fx += ((D * x[-1].T).T * x[-1]).sum(axis=0) * lamda / 2
-    # _, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
-    y.append(new_y)
-    fx.append(new_fx)
-    if verbose > 0:
-        t_now = datetime.now()
-        print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}')
+
     return np.array(iteration_times), np.array(x), np.array(y), np.array(fx)
 
 
