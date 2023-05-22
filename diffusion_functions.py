@@ -290,14 +290,13 @@ def sweep_cut(x, n, m, D, hypergraph, weights=None, center_id=None, hypergraph_n
 
 
 def all_sweep_cuts(x, n, m, node_weights, hypergraph, verbose):
-    value = np.zeros((x.shape[0], x.shape[2], x.shape[1]-1))
+    value = np.zeros((x.shape[1], x.shape[0]-1))
     volume = np.zeros(value.shape)
     conductance = np.zeros(value.shape)
-    for t, xt in enumerate(x):
-        for d, xtd in enumerate(xt.T):
-            if verbose > 0:
-                print(f't = {t:3d}. d = {d:3d}', end='\r')
-            value[t, d], volume[t, d], conductance[t, d] = sweep_cut(xtd, n, m, node_weights, hypergraph)
+    for d, xtd in enumerate(x.T):
+        if verbose > 0:
+            print(f'd = {d:3d}', end='\r')
+        value[d], volume[d], conductance[d] = sweep_cut(xtd, n, m, node_weights, hypergraph)
     if verbose > 0:
         print()
     return value, volume, conductance
