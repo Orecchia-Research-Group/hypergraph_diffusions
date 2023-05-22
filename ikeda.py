@@ -115,7 +115,7 @@ def main():
             return
     if args.verbose > 0:
         print(f'Reading hypergraph from file {args.hypergraph}')
-    func = diffusion_functions['infinity']
+    func = diffusion_functions[args.function]
     n, m, node_weights, hypergraph, weights, center_id, hypergraph_node_weights = reading.read_hypergraph(args.hypergraph)
     if args.random_seed is None:
         args.random_seed = np.random.randint(1000000)
@@ -168,10 +168,10 @@ def main():
 
     if args.verbose > 0:
         print('Min values')
-        print(f'{"Last iterate":20s} = {fx.min():10.6f}')
-        print(f'{"Averaging":20s} = {fx_cs.min():10.6f}')
+        print(f'{"Last iterate":20s} = {fx[-1].min():10.6f}')
+        print(f'{"Averaging":20s} = {fx_cs[-1].min():10.6f}')
         # print(f'{"Tail Averaging":20s} = {final_fx.min():10.6f}')
-        print(f'{"Exponential Averaging":20s} = {exp_fx.min():10.6f}')
+        print(f'{"Exponential Averaging":20s} = {exp_fx[-1].min():10.6f}')
 
     # plt.figure()
     # plt.plot(fx_cs)
