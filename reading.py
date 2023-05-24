@@ -99,10 +99,12 @@ def read_labels(filename):
     return label_names, labels
 
 
-def read_positions(filename):
+def read_positions(filename, n, dimensions):
     """Manual positions"""
     if filename is None:
         return None
+    if filename == '0':
+        return np.zeros((n, dimensions))
     with open(filename) as f:
         positions = np.array([[float(i) for i in line.split()] for line in f])
         return positions

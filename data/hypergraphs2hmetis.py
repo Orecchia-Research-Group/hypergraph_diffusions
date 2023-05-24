@@ -170,8 +170,8 @@ def generate_nodeGrid(input_directory, verbose=0):
             nodes.append(node)
             w += 1
             hyperedge_node_weights.append(np.exp(-1 / m))
-        for node in nodes:
-            degree[node] += w
+        for i, node in enumerate(nodes):
+            degree[node] += w * hyperedge_node_weights[i]
         nodes = tuple(nodes)
         hypergraph.append(nodes)
         weights[nodes] = w
@@ -313,6 +313,10 @@ def main():
         write_hypergraph(hmetis_filename, n, m, degree, hypergraph, weights, center_id, hypergraph_node_weights)
         write_node_dict(dict_filename, node_dict)
         write_labels(label_filename, label_names, labels)
+
+
+def __init__():
+    pass
 
 
 if __name__ == '__main__':
