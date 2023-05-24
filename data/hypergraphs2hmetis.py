@@ -279,7 +279,8 @@ def write_labels(filename, label_names, labels, verbose=0):
 
 def parse_args():
     """Parses arguments."""
-    parser = argparse.ArgumentParser(description='Convert the varying hypergraph formats into the uniform hMETIS format.')
+    parser = argparse.ArgumentParser(description='Convert the varying hypergraph formats into the uniform hMETIS format.',
+                                     epilog='Konstantinos Ameranis, University of Chicago 2023')
     parser.add_argument('-i', '--input_directory', help='Directory where the raw data is stored.', type=str, default=SRC_DIR)
     parser.add_argument('-o', '--output_directory', help='Directory to write the processed results.', type=str, default=SRC_DIR)
     parser.add_argument('-n', '--names', help='Choose which hypergraphs you want to process.', nargs='+', choices=CONVERSION_FUNCTION.keys(), default=CONVERSION_FUNCTION.keys())

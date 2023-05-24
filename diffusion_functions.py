@@ -230,7 +230,8 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=0, center_id=None,
     t = 1
     t_start = datetime.now()
     iteration_times = [0]
-    print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
+    if verbose > 0:
+        print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     while True:
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
         gradient -= s

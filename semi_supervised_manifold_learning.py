@@ -277,13 +277,12 @@ def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 	random_seeds = np.random.choice(np.arange(n),size = num_rand_seeds)
 	x0[random_seeds[random_seeds < n/2]] = -1
 	x0[random_seeds[random_seeds > n/2]] = 1
+	if s_vector is None:
+		s_vector = np.zeros_like(x0)
 
 	# for our hypergraph, first specify the edge objective function
-	x, y ,fx = diffusion(x0, n, m, D, hypergraph, weights=None, func=hypergraph_objective, 
+	t, x, y ,fx = diffusion(x0, n, m, D, hypergraph, weights=None, func=hypergraph_objective,
 						 s=s_vector, h=step_size, T=num_iterations, verbose=verbose)
-
-	if np.all(s_vector==None):
-		s_vector = np.full(shape=(n,1),fill_value = 0)
 
 	W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights=None)
 	hypergraph_cut_ojbective = lambda vec: eval_hypergraph_cut_fn(hypergraph_objective, vec, s_vector, sparse_h, rank, W, D)
@@ -291,7 +290,7 @@ def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 
 	# now run the vanilla graph diffusion
 	# STEP SIZE 1/2
-	x, y ,fx = graph_diffusion(x0, D, knn_adj_matrix, s=s_vector, h=0.5, T=num_iterations,verbose = verbose)
+	x, y, fx = graph_diffusion(x0, D, knn_adj_matrix, s=s_vector, h=0.5, T=num_iterations,verbose = verbose)
 
 	graph_cut_objective = lambda vec: eval_graph_cut_fn(D,knn_adj_matrix,s_vector,vec)
 	graph_diff_results = dict({'x':x,'y':y,'fx':fx,'objective':graph_cut_objective,'type':'graph'})

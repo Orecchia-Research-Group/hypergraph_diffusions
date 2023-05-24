@@ -48,7 +48,7 @@ def data_from_pickle(directory='results', cut_function=None, regularizer=None, a
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(epilog='Konstantinos Ameranis, University of Chicago 2023')
     parser.add_argument('-d', '--directory', type=str, default='results', help='Directory where .pickle files are')
     parser.add_argument('-c', '--cut-function', type=str, default=None, help='Restrict to only one cut function')
     parser.add_argument('-r', '--regularizer', default=None, type=str, help='Restrict to specific regularizer')
