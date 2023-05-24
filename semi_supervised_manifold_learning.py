@@ -171,6 +171,23 @@ def build_knn_hypergraph(data_matrix,k):
 	return dict({'n':n,'m':m,'degree':k,'hypergraph':hypergraph,
 		'node_dict': node_dict,'labels':labels,'label_names':label_names})
 
+def compute_hypergraph_matrices(n, m, hypergraph, weights, hypergraph_node_weights=None):
+    if weights is None:
+        weights = defaultdict(lambda: 1)
+    values = []
+    i = []
+    j = []
+    w = []
+    for row, e in enumerate(hypergraph):
+        values.extend([1] * len(e) if hypergraph_node_weights is None else hypergraph_node_weights[e])
+        i.extend([row] * len(e))
+        j.extend(e)
+        w.append(weights[e])
+    W = sparse.diags(w).tocsr()
+    sparse_h = sparse.coo_matrix((values, (i, j)), shape=(m, n))
+    rank = np.array(sparse_h.sum(axis=0)).squeeze()
+    return W, sparse_h, rank
+
 """
 GRAPH DIFFUSION
 
