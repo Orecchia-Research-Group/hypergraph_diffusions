@@ -26,6 +26,8 @@ print('Timings - Table 3')
 for name, r in results.items():
     print(f"{name:21s}", end='')
     for func_name, a in sorted(r.items()):
+        if func_name == 'linear':
+            continue
         print(f" & {len(a['t'])-1:3d} & {a['t'][-1]:8.2f} & {a['t'][-1] / len(a['t']):7.3f}", end='')
     print(" \\\\")
 

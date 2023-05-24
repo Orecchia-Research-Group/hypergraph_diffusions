@@ -9,7 +9,11 @@ Hypergraphs/[name].hmetis:
     `z` is not used, but is intended to describe how much each node participates in the hyperedge.
     In the next `m` lines the hyperedges are provided. If they are weighted, then the first number provides their weight, the rest of the numbers are integers describing the participating nodes.
     If node volume is provided, in the next `n` lines there is a single real number, the volume of node `u`.
-    
+
+
+produce_results.py:
+    Used to produce tables and figures for the paper submission.
+
 
 hypergraph2hmetis.py:
     Create hypergraphs from raw data. For finished hypergraphs see the `Hypergraphs` directory.
