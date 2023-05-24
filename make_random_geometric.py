@@ -41,7 +41,7 @@ def generate_hypergraph(n, k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(epilog='Konstantinos Ameranis, University of Chicago 2023')
     parser.add_argument('n', type=int, help='Number of nodes')
     parser.add_argument('-k', default=5, type=int, help='Number of neighbors')
     parser.add_argument('-d', '--directory', default='data', type=str, help='Directory to save (hyper)graph')
