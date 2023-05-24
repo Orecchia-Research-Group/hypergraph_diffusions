@@ -10,16 +10,17 @@ from matplotlib.animation import FuncAnimation
 from sklearn.neighbors import NearestNeighbors, kneighbors_graph
 import json
 from datetime import datetime
+from tqdm import tqdm
 
 from diffusion_functions import *
 from animate_diffusion import animate_diffusion
 
-from tqdm import tqdm
 
 import pdb
 
 """
 DATA GENERATION 
+from tqdm import tqdm
 
 Methods for building different "datasets" to cluster on. All methods return two
 (2n_pts x 2) numpy arrays: the first is "clean" data, the second has noise added.
@@ -28,7 +29,7 @@ All methods construct both arrays such that that the first n/2 columns belong to
 community 1 and the latter n/2 columns all belong to community 2.
 """
 
-def generate_spirals(tightness = 3, num_rotations = 2.5, n_pts = 300, noise_level = 1.3,verbose = True):
+def generate_spirals(tightness = 3, num_rotations = 1.5, n_pts = 300, noise_level = 1,verbose = True):
 	# generate spiral polar coordinates
 	theta = np.sqrt(np.linspace(start = (np.pi/2)**2, stop = (num_rotations*2*np.pi)**2,num=n_pts))
 	r = tightness*theta
@@ -53,7 +54,7 @@ def generate_spirals(tightness = 3, num_rotations = 2.5, n_pts = 300, noise_leve
 
 	return clean_data, noisy_data
 
-def generate_overlapping_rings(r_1 = 2, r_2 = 5, n_pts = 300, x_shift = 5, 
+def generate_overlapping_rings(r_1 = 2, r_2 = 3, n_pts = 300, x_shift = 3, 
 	y_shift = 0, noise_level = 0.2, verbose = True):
 	theta = np.linspace(start = 0, stop = 2*np.pi,num=n_pts)
 	ring_1 = np.vstack([np.multiply(r_1, np.cos(theta)),np.multiply(r_1, np.sin(theta))])
@@ -82,7 +83,7 @@ def generate_overlapping_rings(r_1 = 2, r_2 = 5, n_pts = 300, x_shift = 5,
 def generate_concentric_circles(r_1 = 2, r_2 = 1.3, n_pts = 300, noise_level = 0.1,verbose = True):
 	theta = np.linspace(start = 0, stop = 2*np.pi,num=n_pts)
 	ring = np.vstack([np.multiply(r_1, np.cos(theta)),np.multiply(r_1, np.sin(theta))])
-	noisy_ring = ring + np.random.normal(scale=noise_level,size=(n_pts,2)).T
+	noisy_ring = ring + np.random.normal(scale=noise_level,size=(2,n_pts))
 
 	rand_radii = np.random.uniform(low=0,high=r_2,size = n_pts)
 	circle = np.vstack([np.multiply(rand_radii, np.cos(theta)),np.multiply(rand_radii, np.sin(theta))])
@@ -100,6 +101,44 @@ def generate_concentric_circles(r_1 = 2, r_2 = 1.3, n_pts = 300, noise_level = 0
 	clean_data = np.hstack([ring,circle]).T
 	noisy_data = np.hstack([noisy_ring,noisy_circle]).T
 	return clean_data, noisy_data
+
+def generate_concentric_highdim(ambient_dim = 5, r_inner = 1.3, r_outer = 2, n_pts = 300, 
+								noise_level = 0.1,verbose = True):
+	outer_shell = np.random.normal(size=(ambient_dim, n_pts))
+	# normalize
+	outer_shell = r_outer*np.divide(outer_shell, np.linalg.norm(outer_shell, ord = 2, axis = 0))
+	noisy_outer_shell = outer_shell + np.random.normal(scale = noise_level, size=(ambient_dim, n_pts))
+	
+	# inner data
+	# random unit vectors
+	inner_sphere = np.random.normal(size=(ambient_dim, n_pts))
+	inner_sphere = np.divide(inner_sphere, np.linalg.norm(inner_sphere, ord = 2, axis = 0))
+	# sample radii by dim-th root
+	radii = r_inner * np.power(np.random.uniform(low = 0.0, high = 1.0, size= n_pts), 1/ambient_dim)
+	inner_sphere = np.multiply(radii, inner_sphere)
+	
+	#clean_data = inner_sphere.T # np.hstack([outer_shell,inner_sphere]).T
+	#noisy_data = inner_sphere.T #np.hstack([noisy_outer_shell,inner_sphere]).T
+	clean_data = np.hstack([outer_shell,inner_sphere]).T
+	noisy_data = np.hstack([noisy_outer_shell,inner_sphere]).T
+	
+	if verbose:
+		plot_projection(clean_data, labels='halves')
+		plot_projection(noisy_data, labels='halves')
+	
+	return clean_data, noisy_data
+
+def plot_projection(high_dim_data, labels = None):
+	ax = plt.subplot()
+	if labels=='halves':
+		community_size = int(high_dim_data.shape[0]/2)
+		plt.plot(high_dim_data[:community_size,0], high_dim_data[:community_size,1],'o')
+		plt.plot(high_dim_data[community_size:,0], high_dim_data[community_size:,1],'o')
+	else:    
+		plt.plot(high_dim_data[:,0], high_dim_data[:,1],'o', c = labels)
+	ax.set_aspect('equal')
+	plt.show()
+	return
 
 """
 (HYPER)GRAPH CONSTRUCTION
@@ -156,7 +195,7 @@ def eval_graph_cut_fn(D,A,s,x):
 	return graph_quadratic(L,x)# - s@x
 	
 
-def graph_diffusion(x0, D, A, s=None, h=0.1, T=100,verbose = True):
+def graph_diffusion(x0, D, A, s=None, h=0.5, T=100,verbose = True):
 	n = x0.shape[0]
 	if np.all(s==None):
 		s = np.full(shape=(n,1),fill_value = 0)
@@ -234,7 +273,8 @@ def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 	hypergraph_diff_results = dict({'x':x,'y':y,'fx':fx,'objective':hypergraph_cut_ojbective,'type':'hypergraph'})
 
 	# now run the vanilla graph diffusion
-	x, y ,fx = graph_diffusion(x0, D, knn_adj_matrix, s=s_vector, h=step_size, T=num_iterations,verbose = verbose)
+	# STEP SIZE 1/2
+	x, y ,fx = graph_diffusion(x0, D, knn_adj_matrix, s=s_vector, h=0.5, T=num_iterations,verbose = verbose)
 
 	graph_cut_objective = lambda vec: eval_graph_cut_fn(D,knn_adj_matrix,s_vector,vec)
 	graph_diff_results = dict({'x':x,'y':y,'fx':fx,'objective':graph_cut_objective,'type':'graph'})
@@ -277,11 +317,12 @@ def animate_pts_in_plane(data_matrix, results, ax, i,title=None):
 	x = results['x']
 
 	ax.clear()
-	ax.scatter(data_matrix[:,0],data_matrix[:,1],c=x[i])
-	error,_ = find_min_sweepcut(x[i],resolution = 100)  
 	
-	error_string = f'\n iteration {i:d}, min sweepcut error ={error:.2f}'
-	ax.set_title(title+error_string)
+	im = ax.scatter(data_matrix[:,0],data_matrix[:,1],c=x[i])
+	# for colorbar implementation, maybe check out solutions here:
+	# https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
+
+	ax.set_title(title)
 	return ax
 
 def animate_pt_separation(data_matrix, results, ax, i,title=None):
@@ -339,7 +380,12 @@ def animate_sweep_cut_in_plane(data_matrix, results, ax, i,title=None):
 		objective_value = cut_objective_function(label_estimates)
 		error_string = f'\n iteration {i:d}, f(sweepcut) = {objective_value:.2f} \n class. error of threshold=0 cut ={error:.2f}'
 		
+	#im = ax.scatter(data_matrix[:,0],data_matrix[:,1],c=x[i])
+	#plt.colorbar(im, ax=ax)
 	ax.scatter(data_matrix[:,0],data_matrix[:,1],c=make_sweep_cut(x[i], threshold))
+
+	#matplotlib.colorbar.ColorbarBase(ax=ax,  values=sorted(x[i]))
+
 	ax.set_title(title+error_string)
 	return ax
 
@@ -355,7 +401,7 @@ def sweep_cut_classification_error(label_estimates):
 	labels = np.hstack([np.full(shape=n_pts,fill_value = -1),np.full(shape=n_pts,fill_value = 1)])
 	return sum(np.reshape(label_estimates,newshape=(n))!=labels)/n
 
-def find_min_sweepcut(node_values,resolution,cut_objective_function):
+def find_min_sweepcut(node_values,resolution,cut_objective_function, orthogonality_constraint = 'auto'):
 	ascending_node_values = np.unique(node_values)
 	# sweep from lowest nontrivial cut to highest nontrivial cut
 	low = ascending_node_values[1]
@@ -363,12 +409,20 @@ def find_min_sweepcut(node_values,resolution,cut_objective_function):
 
 	min_observed_value = np.inf
 	best_threshold = low
+
+	if orthogonality_constraint=='auto':
+		# find orthogonality constraint created by 0-threshold and add 10% buffer
+		zero_estimates = make_sweep_cut(node_values, 0)
+		orthogonality_constraint = np.abs(np.sum(zero_estimates)/len(zero_estimates))+0.1
 	
 	sweep_vals = np.append(np.linspace(low,high,num=resolution,endpoint=False),0.0)
+
 	for threshold in sweep_vals:
 		label_estimates = make_sweep_cut(node_values, threshold)
 		objective_value = cut_objective_function(label_estimates)
-		if objective_value < min_observed_value:
+		orthogonality_error = np.abs(np.sum(label_estimates)/len(label_estimates))
+
+		if objective_value < min_observed_value and orthogonality_error < orthogonality_constraint:
 			min_observed_value = objective_value
 			best_threshold = threshold
 	return min_observed_value, best_threshold
@@ -378,6 +432,24 @@ MULTI-TRIAL EXPERIMENTS
 
 Methods for running many repeated trials and comparing performance.
 """
+
+def compare_estimated_labels(generate_data,k,target_iteration,
+	diffusion_step_size,titlestring=None):
+	
+	# generate new data
+	_,data_matrix = generate_data(verbose = False)
+
+	# build graph/hypergraph
+	knn_adj_matrix = build_knn_graph(data_matrix,k)
+	knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
+
+	# run diffusion
+	n = data_matrix.shape[1]
+	hypergraph_diff_results, graph_diff_results = semi_superivsed_knn_clustering(knn_adj_matrix,
+					knn_hgraph_dict, num_iterations = target_iteration, verbose = False)
+
+	return graph_diff_results['x'], hypergraph_diff_results['x'], data_matrix
+
 
 def repeated_clustering_experiments(generate_data,k,diffusion_iterations,
 	diffusion_step_size,num_trials,titlestring=None):
@@ -432,7 +504,7 @@ def repeated_clustering_experiments(generate_data,k,diffusion_iterations,
 		plt.show()
 
 	# one figure with both trajectories
-	if True:
+	if False:
 		iterations = np.arange(0,diffusion_iterations)
 		plt.figure(figsize=(12, 6))
 		plotting_label = ['graph','hypergraph']
