@@ -20,7 +20,6 @@ import pdb
 
 """
 DATA GENERATION 
-from tqdm import tqdm
 
 Methods for building different "datasets" to cluster on. All methods return two
 (2n_pts x 2) numpy arrays: the first is "clean" data, the second has noise added.
@@ -78,28 +77,6 @@ def generate_overlapping_rings(r_1 = 2, r_2 = 3, n_pts = 300, x_shift = 3,
 	clean_data = np.hstack([ring_1,ring_2]).T
 	noisy_data = np.hstack([noisy_ring_1,noisy_ring_2]).T
 
-	return clean_data, noisy_data
-
-def generate_concentric_circles(r_1 = 2, r_2 = 1.3, n_pts = 300, noise_level = 0.1,verbose = True):
-	theta = np.linspace(start = 0, stop = 2*np.pi,num=n_pts)
-	ring = np.vstack([np.multiply(r_1, np.cos(theta)),np.multiply(r_1, np.sin(theta))])
-	noisy_ring = ring + np.random.normal(scale=noise_level,size=(2,n_pts))
-
-	rand_radii = np.random.uniform(low=0,high=r_2,size = n_pts)
-	circle = np.vstack([np.multiply(rand_radii, np.cos(theta)),np.multiply(rand_radii, np.sin(theta))])
-	noisy_circle = circle #+ np.random.normal(scale=noise_level,size=(2,n_pts))
-
-	if verbose:
-		for man_1,man_2 in [(ring,circle),(noisy_ring,noisy_circle)]:
-			plt.plot(man_1[0,:],man_1[1,:],'o',color='r')
-			plt.plot(man_2[0,:],man_2[1,:],'o',color='b')
-			ax = plt.gca()
-			ax.set_aspect('equal')
-			plt.show()
-		
-	# combine into one dataset
-	clean_data = np.hstack([ring,circle]).T
-	noisy_data = np.hstack([noisy_ring,noisy_circle]).T
 	return clean_data, noisy_data
 
 def generate_concentric_highdim(ambient_dim = 5, r_inner = 1.3, r_outer = 2, n_pts = 300, 
@@ -298,112 +275,10 @@ def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 	return hypergraph_diff_results, graph_diff_results
 
 """
-ANIMATION
+ASSESMENT UTILITIES
 
-Fun part! Animating our results.
-
-All methods assume you've created a matplotlib subplots object with the right
- number of subplots for the list of results you're feeding in.
+Methods for assessing the performance of estimates produced by diffusions.
 """
-
-# Given a list of results dicts, animate all side-by-side.
-def side_by_side_animation(fig,ax, results, data_matrix, animation_fn):
-	if isinstance(results, dict):
-		num_frames = results['x'].shape[0]
-	elif isinstance(results, list):
-		num_frames = min([result_dict['x'].shape[0] for result_dict in results])
-	
-	ani = matplotlib.animation.FuncAnimation(fig, lambda i: call_animation_fn(ax,animation_fn,data_matrix, results,
-															i),frames=num_frames,interval=150, repeat=False)
-	return ani
-
-def call_animation_fn(ax, animation_fn, data_matrix, results,  i):
-	n = data_matrix.shape[0]
-	
-	if isinstance(results, dict):
-		animation_fn(data_matrix, results, ax, i,title=results['type'])
-	
-	elif isinstance(results, list):
-		for idx,results in enumerate(results):
-			animation_fn(data_matrix, results, ax[idx], i,title=results['type'])
-
-	return ax
-
-def animate_pts_in_plane(data_matrix, results, ax, i,title=None):
-	x = results['x']
-
-	ax.clear()
-	
-	im = ax.scatter(data_matrix[:,0],data_matrix[:,1],c=x[i])
-	# for colorbar implementation, maybe check out solutions here:
-	# https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
-
-	ax.set_title(title)
-	return ax
-
-def animate_pt_separation(data_matrix, results, ax, i,title=None):
-	x = results['x']
-
-	n = x.shape[1]
-	fn_values = x[i]
-
-	ax.clear()
-	ax.scatter(fn_values[:int(n/2)],np.full(shape=int(n/2),fill_value = -1))
-	ax.scatter(fn_values[int(n/2):],np.full(shape=int(n/2),fill_value = 1))
-	# draw a line at zero for ease of visualizing
-	ax.plot(np.full(shape=10,fill_value = 0),np.linspace(-1,1,num=10))
-	if title:
-		ax.set_title(title)
-	return ax
-
-def animate_sweep_cut_by_threshold(data_matrix, results, ax, i,title=None):
-	x = results['x']
-
-	n = x.shape[1]
-
-	sweep_vals = np.linspace(-1,1,num=x.shape[0])
-	threshold = sweep_vals[i]
-	final_values = x[-1,:]
-	mask = make_sweep_cut(final_values, threshold)
-	
-	ax.clear()
-	ax.scatter(data_matrix[:,0],data_matrix[:,1],c=mask)
-	classification_error = sweep_cut_classification_error(mask)
-	
-	error_string = f' with classification error ={classification_error:.2f} \n threshold = {threshold:.2f}'
-	ax.set_title(title+error_string)
-
-	return ax
-
-def animate_sweep_cut_in_plane(data_matrix, results, ax, i,title=None):
-	x = results['x']
-
-	cut_objective_function = results['objective']
-
-	ax.clear()
-	
-	# adaptive option: find the best sweepcut
-	if False:
-		objective_value,threshold = find_min_sweepcut(x[i],resolution = 100, cut_objective_function = cut_objective_function)
-		error = sweep_cut_classification_error(make_sweep_cut(x[i], threshold))
-		error_string = f'\n iteration {i:d}, f(sweepcut) = {objective_value:.2f}, threshold = {float(threshold):.2f} \n class. error of energy-min. cut ={error:.2f}'
-	
-	# non-adaptive: cut around 0
-	if True:
-		threshold = 0 
-		label_estimates = make_sweep_cut(x[i], threshold)
-		error = sweep_cut_classification_error(label_estimates)
-		objective_value = cut_objective_function(label_estimates)
-		error_string = f'\n iteration {i:d}, f(sweepcut) = {objective_value:.2f} \n class. error of threshold=0 cut ={error:.2f}'
-		
-	#im = ax.scatter(data_matrix[:,0],data_matrix[:,1],c=x[i])
-	#plt.colorbar(im, ax=ax)
-	ax.scatter(data_matrix[:,0],data_matrix[:,1],c=make_sweep_cut(x[i], threshold))
-
-	#matplotlib.colorbar.ColorbarBase(ax=ax,  values=sorted(x[i]))
-
-	ax.set_title(title+error_string)
-	return ax
 
 def make_sweep_cut(vector, threshold):
 	mask = np.full(shape=vector.shape,fill_value = np.nan)
@@ -465,107 +340,5 @@ def compare_estimated_labels(generate_data,k,target_iteration,
 					knn_hgraph_dict, num_iterations = target_iteration, verbose = False)
 
 	return graph_diff_results['x'], hypergraph_diff_results['x'], data_matrix
-
-
-def repeated_clustering_experiments(generate_data,k,diffusion_iterations,
-	diffusion_step_size,num_trials,titlestring=None):
-	graph_error_vs_iteration = list()
-	hypergraph_error_vs_iteration = list()
-
-	# For each trial,
-	for idx in tqdm(range(num_trials)):
-		# generate new data
-		_,data_matrix = generate_data(verbose = False)
-
-		# build graph/hypergraph
-		knn_adj_matrix = build_knn_graph(data_matrix,k)
-		knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
-
-		# run diffusion
-		n = data_matrix.shape[1]
-		hypergraph_diff_results, graph_diff_results = semi_superivsed_knn_clustering(knn_adj_matrix,
-						knn_hgraph_dict, num_iterations = diffusion_iterations, verbose = False)
-
-		graph_x = graph_diff_results['x']
-		graph_error_vs_iteration.append(np.array([sweep_cut_classification_error(make_sweep_cut(graph_x[i],threshold = 0)) for i in range(diffusion_iterations)]))
-
-		hypergraph_x = hypergraph_diff_results['x']
-		hypergraph_error_vs_iteration.append(np.array([sweep_cut_classification_error(make_sweep_cut(hypergraph_x[i],threshold = 0)) for i in range(diffusion_iterations)]))
-
-		# plot what'a happening at 5 steps in:
-		if False:
-			fig, ax = plt.subplots(1,2,figsize=(12, 6))
-			ax[0].scatter(data_matrix[:,0],data_matrix[:,1],c=make_sweep_cut(graph_x[20], 0))
-			ax[0].set_title('graph')
-
-			ax[1].scatter(data_matrix[:,0],data_matrix[:,1],c=make_sweep_cut(hypergraph_x[20], 0))
-			ax[1].set_title('hypergraph')
-			plt.show()
-
-
-	# two side-by-side figures
-	if False:
-		iterations = np.arange(0,diffusion_iterations)
-
-		for idx,error_array in enumerate([np.array(graph_error_vs_iteration), np.array(hypergraph_error_vs_iteration)]):
-			mean_error_by_iteration = np.mean(error_array,axis=0)
-			std_error_by_iteration = np.std(error_array,axis=0)
-
-			ax[idx].plot(iterations, mean_error_by_iteration)
-			ax[idx].fill_between(iterations, mean_error_by_iteration-std_error_by_iteration, mean_error_by_iteration+std_error_by_iteration,alpha = 0.5)
-
-		fig, ax = plt.subplots(1,2,figsize=(12, 6))
-		ax[0].set_title('graph \n classification error versus iteration number')
-		ax[1].set_title('hypergraph \n classification error versus iteration number')
-		plt.show()
-
-	# one figure with both trajectories
-	if False:
-		iterations = np.arange(0,diffusion_iterations)
-		plt.figure(figsize=(12, 6))
-		plotting_label = ['graph','hypergraph']
-		plotting_color = ['b','o']
-		for idx,error_array in enumerate([np.array(graph_error_vs_iteration), np.array(hypergraph_error_vs_iteration)]):
-			mean_error_by_iteration = np.mean(error_array,axis=0)
-			std_error_by_iteration = np.std(error_array,axis=0)
-
-			plt.plot(iterations, mean_error_by_iteration,label = plotting_label[idx])
-			plt.fill_between(iterations, mean_error_by_iteration-std_error_by_iteration, mean_error_by_iteration+std_error_by_iteration,alpha = 0.5)
-		plt.legend()
-		plt.title('Error versus iteration number'+titlestring)
-		plt.show()
-
-	return np.array(graph_error_vs_iteration), np.array(hypergraph_error_vs_iteration)
-
-"""
-MAIN
-
-Run a cute little demo
-"""
-def main():
-	# generate toy example
-	_, data_matrix = generate_spirals(tightness = 3, num_rotations = 2.5, n_pts = 300, noise_level = 1.3,verbose = False)
-
-	# build graph/hypergraph
-	k = 5
-	knn_adj_matrix = build_knn_graph(data_matrix,k)
-	knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
-
-	n = data_matrix.shape[1]
-
-	# run some diffusions
-	hypergraph_diff_results, graph_diff_results = semi_superivsed_knn_clustering(knn_adj_matrix,
-																			 knn_hgraph_dict,
-																			num_iterations = 25)
-	# animate our results
-	fig, ax = plt.subplots(1,2,figsize=(12, 6))
-	ani = side_by_side_animation(fig,ax, [graph_diff_results,hypergraph_diff_results],data_matrix, animate_sweep_cut_in_plane)
-	f = r"spirals_sweep_cut.gif" 
-	writergif = matplotlib.animation.PillowWriter(fps=60) 
-	ani.save(f, writer=writergif)
-	return
-
-if __name__ == '__main__':
-	main()
 
 
