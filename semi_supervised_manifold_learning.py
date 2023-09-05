@@ -4,9 +4,11 @@ Tools for performing semi-supervised clustering by diffusing randomly seeded lab
 """
 
 import numpy as np
+import networkx as nx
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from sklearn import metrics
 from sklearn.neighbors import NearestNeighbors, kneighbors_graph
 import json
 from datetime import datetime
@@ -227,7 +229,7 @@ def graph_diffusion(x0, D, A, s=None, h=0.5, T=100,verbose = True):
 """
 SINGLE-TRIAL EXPERIMENTS
 
-Running semi-supervised clustering on a knn (hyper)graph via diffusions.
+Running semi-supervised clustering on a knn (hyper)graph via diffusions versus PPR.
 
 Currently implemented "slowly". Def possible to speedup for symmetric Laplacians
 (i.e. undirected graphs).
@@ -237,7 +239,7 @@ def eval_hypergraph_cut_fn(hypergraph_objective, target_vector, s_vector, sparse
 	return fx
 
 
-def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
+def diffusion_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 		s_vector = None, hypergraph_objective = diffusion_functions['infinity'],
 		num_rand_seeds = 30, step_size = 1, num_iterations = 100, verbose = True):
 	
@@ -262,8 +264,8 @@ def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 						 s=s_vector, h=step_size, T=num_iterations, verbose=verbose)
 
 	W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights=None)
-	hypergraph_cut_ojbective = lambda vec: eval_hypergraph_cut_fn(hypergraph_objective, vec, s_vector, sparse_h, rank, W, D)
-	hypergraph_diff_results = dict({'x':x,'y':y,'fx':fx,'objective':hypergraph_cut_ojbective,'type':'hypergraph'})
+	hypergraph_cut_objective = lambda vec: eval_hypergraph_cut_fn(hypergraph_objective, vec, s_vector, sparse_h, rank, W, D)
+	hypergraph_diff_results = dict({'x':x,'y':y,'fx':fx,'objective':hypergraph_cut_objective,'type':'hypergraph'})
 
 	# now run the vanilla graph diffusion
 	# STEP SIZE 1/2
@@ -273,6 +275,91 @@ def semi_superivsed_knn_clustering(knn_adj_matrix,knn_hgraph_dict,
 	graph_diff_results = dict({'x':x,'y':y,'fx':fx,'objective':graph_cut_objective,'type':'graph'})
 
 	return hypergraph_diff_results, graph_diff_results
+
+
+def PPR_knn_clustering(knn_adj_matrix,knn_hgraph_dict, error_tolerance = 0.1,
+		teleportation_factor = 0.5, hypergraph_objective = diffusion_functions['infinity'],
+		num_rand_seeds = 30, step_size = 1, num_iterations = 100, verbose = True):
+
+	# teleportation_factor corresponds to a resolvent for lambda = effective_lambda
+	effective_lambda = 2*teleportation_factor/(1-teleportation_factor)
+
+	# let's extract some parameters
+	n = knn_hgraph_dict['n']
+	m = knn_hgraph_dict['m']
+	k = knn_hgraph_dict['degree']
+	hypergraph = knn_hgraph_dict['hypergraph']
+
+	D = np.full(shape=n,fill_value=k)
+
+	# create an s vector proportionate to label vector, with num_rand_seeds randomly chosen true labels
+	seeded_labels = np.full(shape=(n,1),fill_value = 0)
+	random_seeds = np.random.choice(np.arange(n),size = num_rand_seeds)
+	seeded_labels[random_seeds[random_seeds < n/2]] = -1
+	seeded_labels[random_seeds[random_seeds > n/2]] = 1
+	s_vector = effective_lambda*seeded_labels
+
+	# step size: epsilon/2*u_R
+	step_size = error_tolerance/(2*(1+effective_lambda))
+
+	# Algorithm 1 specifies initialization at 0
+	x0 = np.full(shape=(n,1),fill_value = 0)
+	_, x, y ,fx = diffusion(x0, n, m, D, hypergraph, weights=None, func=hypergraph_objective,
+						 s=s_vector, h=step_size, T=num_iterations, verbose=verbose)				 
+	x_out = (1-error_tolerance/2)*np.sum(x, axis = 0).flatten()
+
+	W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights=None)
+	hypergraph_cut_objective = lambda vec: eval_hypergraph_cut_fn(hypergraph_objective, vec, s_vector, sparse_h, rank, W, D)
+	hypergraph_PPR_results = dict({'x_out':x_out, 'objective':hypergraph_cut_objective,'type':'hypergraph'})
+
+	# Now collect graph PPR vector
+	# manually running comparable iterations on the graph
+	L = np.diag(D) - knn_adj_matrix
+	D_inv = np.diag(np.divide(1,D))
+	gradient_operator = 2*L + effective_lambda*np.diag(D)
+	x_t = np.full(shape=(n,1),fill_value = 0)
+	x = [x_t]
+	for idx in range(num_iterations):
+		x_hat_t = x_t + step_size*D_inv.dot(s_vector)
+		x_t = x_hat_t - step_size*(D_inv@gradient_operator).dot(x_hat_t)
+		x.append(x_t)
+	x = np.array(x)
+	graph_PPR = (1-error_tolerance/2)*np.sum(x, axis = 0).flatten()
+
+	# Right now, using matrix pseudo-inverse: probably not wise, likely to run into some precision issues.
+	#resolvant_operator = np.linalg.pinv(effective_lambda*D+ (D-knn_adj_matrix))
+	#graph_PPR = np.asarray(resolvant_operator.dot(s_vector)).ravel()
+
+	graph_cut_objective = lambda vec: eval_graph_cut_fn(D,knn_adj_matrix,s_vector,vec)
+	graph_PPR_results = dict({'x_out':graph_PPR,'objective':graph_cut_objective,'type':'graph'})
+
+	return hypergraph_PPR_results, graph_PPR_results
+
+def compare_estimated_labels(method, generate_data, k, num_iterations,
+	diffusion_step_size = None,titlestring=None):
+	
+	# generate new data
+	_,data_matrix = generate_data(verbose = False)
+	n = data_matrix.shape[1]
+
+	# build graph/hypergraph
+	knn_adj_matrix = build_knn_graph(data_matrix,k)
+	knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
+
+	# run diffusion
+	if method=='diffusion':
+		hypergraph_diff_results, graph_diff_results = diffusion_knn_clustering(knn_adj_matrix,
+						knn_hgraph_dict, num_iterations = num_iterations, verbose = False)
+		hypergraph_x = hypergraph_diff_results['x']
+		graph_x = graph_diff_results['x']
+		return graph_x[-1, :], hypergraph_x[-1, :], data_matrix
+
+	elif method=='PPR':
+		hypergraph_PPR_results, graph_PPR_results = PPR_knn_clustering(knn_adj_matrix,
+								knn_hgraph_dict, error_tolerance = 0.1, teleportation_factor = 0.5,
+								num_iterations = num_iterations, verbose = False)
+		return graph_PPR_results['x_out'], hypergraph_PPR_results['x_out'], data_matrix
+
 
 """
 ASSESMENT UTILITIES
@@ -319,26 +406,128 @@ def find_min_sweepcut(node_values,resolution,cut_objective_function, orthogonali
 	return min_observed_value, best_threshold
 
 """
-MULTI-TRIAL EXPERIMENTS 
+EXPERIMENTS 
 
-Methods for running many repeated trials and comparing performance.
+Methods for running specific experiments and generating figures.
+"""
+def visualize_labels(method='PPR'):
+	k = 5
+	target_iternum = 50
+	titlestring = 'blah'
+
+	_, ax_binary = plt.subplots(nrows=3, ncols=2,figsize=(10, 15))
+	problem_index = 0
+	for data_generation, problem_kind in [(generate_spirals,' Spirals'), (generate_overlapping_rings,' Rings'),
+										(generate_concentric_highdim,' Concentric Highdim')]:
+		graph_x_out, hypergraph_x_out, data_matrix = compare_estimated_labels(method,data_generation,k,target_iternum,titlestring=None, diffusion_step_size=1)
+
+		for idx,(x,titlestring) in enumerate([(graph_x_out,'Graph'), (hypergraph_x_out,'Hypergraph')]):
+			if problem_index==0:
+				plot_label_comparison_binary(ax_binary[problem_index, idx],x, data_matrix,titlestring)
+			else:
+				plot_label_comparison_binary(ax_binary[problem_index, idx],x, data_matrix,titlestring = 'Abridged')
+		problem_index+=1
+
+	plt.suptitle(f'Label estimates \n Iteration {target_iternum}', fontsize = 15)    
+	plt.show()
+
+
+def compare_AUC_curves(method='PPR'):
+	k = 5
+	num_iterations = 50
+	num_trials = 20
+
+	fig, ax = plt.subplots(nrows=3, ncols=1, figsize = (6, 15))
+	axes_idx = 0
+
+	for data_generation, problem_kind in [(generate_spirals,'Spirals'), (generate_overlapping_rings,'Rings'),
+										(generate_concentric_highdim,'Concentric hyperspheres')]:
+		AUC_vals = []
+		for trial in range(num_trials):
+			# generate new data
+			_,data_matrix = data_generation(verbose=False)
+
+			# build graph/hypergraph
+			knn_adj_matrix = build_knn_graph(data_matrix,k)
+			knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
+
+			# run diffusion
+			if method=='diffusion':
+				hypergraph_diff_results, graph_diff_results = diffusion_knn_clustering(knn_adj_matrix,
+								knn_hgraph_dict, num_iterations = num_iterations, verbose = False)
+				graph_x = graph_diff_results['x']
+				hypergraph_x = hypergraph_diff_results['x']
+
+				graph_x_out = graph_x[-1, :]
+				hypergraph_x_out = hypergraph_x[-1, :]
+			elif method=='PPR':
+				hypergraph_diff_results, graph_diff_results = PPR_knn_clustering(knn_adj_matrix,
+								knn_hgraph_dict, error_tolerance = 0.1, teleportation_factor = 0.5,
+								num_iterations = num_iterations, verbose = False)
+				graph_x_out = graph_diff_results['x_out']
+				hypergraph_x_out = hypergraph_diff_results['x_out']
+
+			n = data_matrix.shape[0]
+			labels = np.hstack([np.full(shape=int(n/2),fill_value = -1),np.full(shape=int(n/2),fill_value = 1)])
+			graph_auc_score = metrics.roc_auc_score(labels, graph_x_out)
+			hypergraph_auc_score = metrics.roc_auc_score(labels, hypergraph_x_out)
+
+			AUC_vals.append((hypergraph_auc_score, graph_auc_score))
+		final_plot_AUC_hist(AUC_vals, ax = ax[axes_idx], decorated = (axes_idx == 0) )
+		axes_idx+=1
+	plt.show()
+
+"""
+PLOTTING UTILITIES
+
+Specific visualizations for figures in paper.
 """
 
-def compare_estimated_labels(generate_data,k,target_iteration,
-	diffusion_step_size,titlestring=None):
-	
-	# generate new data
-	_,data_matrix = generate_data(verbose = False)
+def plot_label_comparison_binary(ax, label_vector, data_matrix, titlestring=None):
+	sweep_cut_resolution = 100
+	error, threshold = find_min_sweepcut(label_vector,sweep_cut_resolution,sweep_cut_classification_error)
+	label_estimates = make_sweep_cut(label_vector, threshold)
+	error = sweep_cut_classification_error(label_estimates)
+	im = ax.scatter(data_matrix[:,0],data_matrix[:,1], c=label_estimates.reshape(-1))
 
-	# build graph/hypergraph
-	knn_adj_matrix = build_knn_graph(data_matrix,k)
-	knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
+	# figure formatting
+	ax.set_aspect('equal')
+	ax.spines["top"].set_visible(False)
+	ax.spines["right"].set_visible(False)
+	ax.spines["bottom"].set_visible(False)
+	ax.spines["left"].set_visible(False)
+	ax.axis('off')
+	if titlestring=='Abridged':
+		ax.set_title(f'Classification error = {error:.3f}', fontsize = 15)
+	else:
+		ax.set_title(titlestring +f'\n Classification error = {error:.3f}', fontsize = 15)
+	return
 
-	# run diffusion
-	n = data_matrix.shape[1]
-	hypergraph_diff_results, graph_diff_results = semi_superivsed_knn_clustering(knn_adj_matrix,
-					knn_hgraph_dict, num_iterations = target_iteration, verbose = False)
+def final_plot_AUC_hist(AUC_vals, ax, decorated = False):
+	plt.rcParams.update({'font.size': 15})
+		
+	hypergraph_vals = [v[0] for v in AUC_vals]
+	graph_vals = [v[1] for v in AUC_vals]
 
-	return graph_diff_results['x'], hypergraph_diff_results['x'], data_matrix
+	full_values = hypergraph_vals+graph_vals
+	_, first_bins = np.histogram(full_values, bins = 10)
 
+	# second style
+	ax.hist(graph_vals, bins = first_bins, alpha=0.5, edgecolor = 'black', label = 'graph')
+	ax.hist(hypergraph_vals, bins = first_bins, alpha=0.5, edgecolor = 'black', label='hypergraph')
 
+	if decorated:
+		ax.set_title(f'AUC Values at Iteration 50 \n Results from 50 Independent Trials')
+		ax.legend()
+		
+	# figure formatting
+	ax.spines["top"].set_visible(False)
+	ax.spines["right"].set_visible(False)
+	ax.tick_params(axis='x', labelsize=15)
+	ax.tick_params(axis='y', labelsize=15)
+	return
+
+#compare_estimated_labels(method='PPR', generate_data = generate_spirals, k=5, num_iterations = 10)
+
+#compare_AUC_curves(method='PPR')
+visualize_labels(method='PPR')
