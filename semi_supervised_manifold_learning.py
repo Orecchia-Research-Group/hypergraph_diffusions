@@ -314,21 +314,21 @@ def PPR_knn_clustering(knn_adj_matrix,knn_hgraph_dict, error_tolerance = 0.1,
 
 	# Now collect graph PPR vector
 	# manually running comparable iterations on the graph
-	L = np.diag(D) - knn_adj_matrix
+	# L = np.diag(D) - knn_adj_matrix
 	D_inv = np.diag(np.divide(1,D))
-	gradient_operator = 2*L + effective_lambda*np.diag(D)
-	x_t = np.full(shape=(n,1),fill_value = 0)
-	x = [x_t]
-	for idx in range(num_iterations):
-		x_hat_t = x_t + step_size*D_inv.dot(s_vector)
-		x_t = x_hat_t - step_size*(D_inv@gradient_operator).dot(x_hat_t)
-		x.append(x_t)
-	x = np.array(x)
-	graph_PPR = (1-error_tolerance/2)*np.sum(x, axis = 0).flatten()
+	# gradient_operator = 2*L + effective_lambda*np.diag(D)
+	# x_t = np.full(shape=(n,1),fill_value = 0)
+	# x = [x_t]
+	# for idx in range(num_iterations):
+	# 	x_hat_t = x_t + step_size*D_inv.dot(s_vector)
+	# 	x_t = x_hat_t - step_size*(D_inv@gradient_operator).dot(x_hat_t)
+	# 	x.append(x_t)
+	# x = np.array(x)
+	# graph_PPR = (1-error_tolerance/2)*np.sum(x, axis = 0).flatten()
 
-	# Right now, using matrix pseudo-inverse: probably not wise, likely to run into some precision issues.
-	#resolvant_operator = np.linalg.pinv(effective_lambda*D+ (D-knn_adj_matrix))
-	#graph_PPR = np.asarray(resolvant_operator.dot(s_vector)).ravel()
+	graph_PPR = np.linalg.solve(a = (1+effective_lambda)*np.eye(n) - D_inv@knn_adj_matrix , b = np.dot(D_inv, s_vector))
+	# flatten n x 1 matrix
+	graph_PPR = graph_PPR.reshape(n)
 
 	graph_cut_objective = lambda vec: eval_graph_cut_fn(D,knn_adj_matrix,s_vector,vec)
 	graph_PPR_results = dict({'x_out':graph_PPR,'objective':graph_cut_objective,'type':'graph'})
@@ -473,7 +473,8 @@ def compare_AUC_curves(method='PPR'):
 			hypergraph_auc_score = metrics.roc_auc_score(labels, hypergraph_x_out)
 
 			AUC_vals.append((hypergraph_auc_score, graph_auc_score))
-		final_plot_AUC_hist(AUC_vals, ax = ax[axes_idx], decorated = (axes_idx == 0) )
+		titlestring = f'AUC Values at Iteration {num_iterations} \n Results from {num_trials} Independent Trials'
+		final_plot_AUC_hist(AUC_vals, ax = ax[axes_idx], decorated = (axes_idx == 0), titlestring = titlestring )
 		axes_idx+=1
 	plt.show()
 
@@ -503,7 +504,7 @@ def plot_label_comparison_binary(ax, label_vector, data_matrix, titlestring=None
 		ax.set_title(titlestring +f'\n Classification error = {error:.3f}', fontsize = 15)
 	return
 
-def final_plot_AUC_hist(AUC_vals, ax, decorated = False):
+def final_plot_AUC_hist(AUC_vals, ax, decorated = False, titlestring = None):
 	plt.rcParams.update({'font.size': 15})
 		
 	hypergraph_vals = [v[0] for v in AUC_vals]
@@ -517,7 +518,8 @@ def final_plot_AUC_hist(AUC_vals, ax, decorated = False):
 	ax.hist(hypergraph_vals, bins = first_bins, alpha=0.5, edgecolor = 'black', label='hypergraph')
 
 	if decorated:
-		ax.set_title(f'AUC Values at Iteration 50 \n Results from 50 Independent Trials')
+		if not (titlestring is None):
+			ax.set_title(titlestring)
 		ax.legend()
 		
 	# figure formatting
