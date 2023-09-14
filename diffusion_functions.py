@@ -125,8 +125,8 @@ def quadratic(x, sparse_h, rank, W, D, center_id=None):
         y = np.divide((sparse_h @ x).T, rank).T
     else:
         y = x[center_id]
-    fx = sum([w * wv * np.linalg.norm(x[j] - y[i], axis=0)**2 for i, j, wv, w in zip(sparse_h.row, sparse_h.col, sparse_h.data, W.data.T)]) / 2 # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x, ((sparse_h.T @ W @ y).T / D).T)
+    fx = sum([W[i, i] * wv * np.linalg.norm(x[j] - y[i], axis=0)**2 for i, j, wv in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
+    gradient = np.subtract((D * x.T).T, sparse_h.T @ W @ y)
     return gradient, y, fx
 
 
@@ -152,8 +152,8 @@ def linear(x, sparse_h, rank, W, D, center_id=None):
             y[i, :] = x[center_id[tuple(he[k:k+row_counter[i]])]]
         k += row_counter[i]
     # print((x.T @ D).sum())
-    fx = sum([w * np.linalg.norm(x[j] - y[i], ord=1, axis=0)**2 for i, j, w in zip(sparse_h.row, sparse_h.col, W.data)]) / 2 # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract(x, ((sparse_h.T @ y).T / D).T)
+    fx = sum([W[i, i] * wv * np.linalg.norm(x[j] - y[i], ord=1, axis=0)**2 for i, j, wv in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
+    gradient = np.subtract((D * x.T).T, sparse_h.T @ W @ y)
     return gradient, y, fx
 
 
@@ -182,18 +182,18 @@ def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_n
             y[i, :] = y_min + (y_max - y_min) / 2
         else:
             y[i, :] = x[center_id[tuple(e)]]
-        dist = np.einsum('i,ij->ij', we, (xe - y[i, :]))
+        dist = np.einsum('v,vd->vd', we, (xe - y[i, :]))
         argmax = dist == dist.max(axis=0)
         argmin = dist == dist.min(axis=0)
         # degree[e] += (argmax | argmin) * W[i, i]
         maxmult = argmax.astype(int)
         minmult = argmin.astype(int)
-        gradient[e] += W[i, i] * np.einsum('ij,i,ij->ij', dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult))
+        gradient[e] += W[i, i] * np.einsum('vd,v,vd->vd', dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult))
         # The following line performs slightly better, but the above line is cleaner
         # and used np.einsum, therefore it is OBVIOUSLY better
         # has not added hyperedge node weights below
         # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
-        fx += np.linalg.norm(dist, ord=np.inf, axis=0) / 2
+        fx += np.linalg.norm(dist, ord=np.inf, axis=0)**2
     # gradient = (gradient.T / D).T
     # degree[degree == 0] = 1
     # fx -= np.einsum('ij,ij->', x, s)
@@ -233,12 +233,12 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=0, center_id=None,
     if verbose > 0:
         print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     while True:
+        # \nabla f(x) = \sum_h w_h \bar{\delta}_h (x)
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
         gradient -= s
         gradient += (D * x[-1].T).T * lamda
         new_fx -= (x[-1] * s).sum(axis=0)
         new_fx += ((D * x[-1].T).T * x[-1]).sum(axis=0) * lamda / 2
-        # gradient, new_fx = added_terms(x[-1], partial_gradient, partial_new_fx, D_mat, f, s, beta)
         # gradient -= gradient.sum(axis=0) / n
         y.append(new_y)
         fx.append(new_fx)

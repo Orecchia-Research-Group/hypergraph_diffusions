@@ -12,8 +12,7 @@ import reading
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Run geometric random walks on cliques.',
-                                     epilog='Konstantinos Ameranis, University of Chicago 2023')
+    parser = argparse.ArgumentParser(description='Run geometric random walks on cliques.')
     parser.add_argument('-g', '--hypergraph', help='Filename of hypergraph to use.', type=str, required=True)
     parser.add_argument('--lamda', '-l', help='Parameter used in personalized pagerank.', type=float, default=0)
     parser.add_argument('-r', '--random-seed', help='Random seed to use for initialization.', type=int, default=None)

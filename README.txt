@@ -41,8 +41,6 @@ hypergraph2hmetis.py:
                                 hypergraph stats.
           -f, --force           Force reprocessing even if .hmetis file is present.
 
-          Konstantinos Ameranis, University of Chicago 2023
-
 
 produce_hypergraph_extractedDblp.py:
     Creates the DBLP dataset from the JSON containing papers.
@@ -76,8 +74,6 @@ make_random_geometric.py:
           -s SEED, --seed SEED  Random seed
           -l LAMDA, --lamda LAMDA
                                 Lamda value for PPR
-
-        Konstantinos Ameranis, University of Chicago 2023
 
 
 reading.py:
@@ -137,8 +133,6 @@ animate_functions.py
           -v, --verbose         Verbose mode. Prints out useful information. Higher
                                 levels print more information.
 
-        Konstantinos Ameranis, University of Chicago 2023
-
 ikeda.py:
     Following the implementation of Ikeda et al. and augmenting with our approach of returning the average of all iterates instead of last iterate.
 
@@ -183,7 +177,6 @@ ikeda.py:
           -v, --verbose         Verbose mode. Prints out useful information. Higher
                                 levels print more information.
 
-        Konstantinos Ameranis, University of Chicago 2023
 
 get_data_from_pickles.py:
     Quickly load all results from the pickle files in paper_results.

@@ -143,8 +143,7 @@ def train(x, y, label_names, verbose=0):
 
 def parse_args():
     """Parse arguments"""
-    parser = argparse.ArgumentParser(description='Animate an electrical flow diffusion.',
-                                     epilog='Konstantinos Ameranis, University of Chicago 2023')
+    parser = argparse.ArgumentParser(description='Animate an electrical flow diffusion.')
     parser.add_argument('-g', '--hypergraph', help='Filename of hypergraph to use.', type=str, required=True)
     parser.add_argument('--step-size', help='Step size value.', type=float, default=STEP_SIZE)
     parser.add_argument('-s', '--seed', help='Filename storing the seed vectors for each node.', type=str, default=None)

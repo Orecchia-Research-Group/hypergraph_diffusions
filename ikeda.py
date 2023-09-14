@@ -80,8 +80,7 @@ def get_function_values(x, func, iterations, sparse_h, rank, W, node_weights, s,
 def parse_args():
     """Parse arguments"""
     parser = argparse.ArgumentParser(prog='Ikeda Practical Evaluation',
-                                     description='Run practical experiments using the method described in Ikeda et al.',
-                                     epilog='Konstantinos Ameranis, University of Chicago 2023')
+                                     description='Run practical experiments using the method described in Ikeda et al.')
     parser.add_argument('-g', '--hypergraph', help='Filename of hypergraph to use.', type=str, required=True)
     parser.add_argument('--step-size', help='Step size value.', type=float, default=STEP_SIZE)
     parser.add_argument('-f', '--function', help='Which diffusion function to use.', choices=diffusion_functions.keys(),
