@@ -30,9 +30,9 @@ All methods construct both arrays such that that the first n/2 columns belong to
 community 1 and the latter n/2 columns all belong to community 2.
 """
 
-def generate_spirals(tightness = 3, num_rotations = 1.5, n_pts = 300, noise_level = 1,verbose = True):
+def generate_spirals(tightness = 3, num_rotations = 1.5, n_pts = 300, noise_level = 1, start_theta = np.pi/2, verbose = True):
 	# generate spiral polar coordinates
-	theta = np.sqrt(np.linspace(start = (np.pi/2)**2, stop = (num_rotations*2*np.pi)**2,num=n_pts))
+	theta = np.sqrt(np.linspace(start = start_theta**2, stop = (num_rotations*2*np.pi)**2,num=n_pts))
 	r = tightness*theta
 	# to cartesian coordinates
 	spiral_1 = np.vstack([np.multiply(r, np.cos(theta)),np.multiply(r, np.sin(theta))]) 
@@ -500,7 +500,7 @@ def plot_label_comparison_binary(ax, label_vector, data_matrix, titlestring=None
 	ax.axis('off')
 	if titlestring=='Abridged':
 		ax.set_title(f'Classification error = {error:.3f}', fontsize = 15)
-	else:
+	elif not (titlestring is None):
 		ax.set_title(titlestring +f'\n Classification error = {error:.3f}', fontsize = 15)
 	return
 
@@ -532,4 +532,4 @@ def final_plot_AUC_hist(AUC_vals, ax, decorated = False, titlestring = None):
 #compare_estimated_labels(method='PPR', generate_data = generate_spirals, k=5, num_iterations = 10)
 
 #compare_AUC_curves(method='PPR')
-visualize_labels(method='PPR')
+#visualize_labels(method='diffusion')

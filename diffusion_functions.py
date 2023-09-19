@@ -11,6 +11,8 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import bicgstab
 
+import pdb
+
 
 EPS = 1e-6
 H = 0.1
