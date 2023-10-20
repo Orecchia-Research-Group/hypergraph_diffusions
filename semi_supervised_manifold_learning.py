@@ -410,6 +410,26 @@ EXPERIMENTS
 
 Methods for running specific experiments and generating figures.
 """
+def small_example_knn_hypergraph():
+	# generate new data
+	_,data_matrix = generate_spirals(n_pts = 50,  start_theta = np.pi/5, num_rotations = 0.9, verbose = False)
+
+	# build a hypergraph from k-nearest-nbs of each point
+	k = 5
+	knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
+	n = knn_hgraph_dict['n']
+	D = np.full(shape=n,fill_value=k)
+
+	# create an s vector proportionate to label vector, with num_rand_seeds randomly chosen true labels
+	num_rand_seeds = int(0.1*n)
+	seeded_labels = np.full(shape=(n,1),fill_value = 0)
+	random_seeds = np.random.choice(np.arange(n),size = num_rand_seeds)
+	seeded_labels[random_seeds[random_seeds < n/2]] = -1
+	seeded_labels[random_seeds[random_seeds > n/2]] = 1
+
+	return data_matrix, knn_hgraph_dict, D, seeded_labels
+
+
 def visualize_labels(method='PPR'):
 	k = 5
 	target_iternum = 50

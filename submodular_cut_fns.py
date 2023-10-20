@@ -8,9 +8,11 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import pairwise_distances
 import pdb
 
-from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary
+from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary, small_example_knn_hypergraph
 from diffusion_functions import diffusion
 from multiprocessing import Pool
+
+from diffusion_functions import *
 
 """
 HELPERS
@@ -240,34 +242,23 @@ def test_cardinality_cut_fn():
             assert y_h[excluded_idx]==0
     return True
 
-# build a hypergraph and compute subgradients for a generic submodular hyperedge cut fn
-# Uses an objective cut_func(S, h) which is assumed to take in sets S and h and be submodular.
-def submodular_semisupervised_clustering(method='PPR', teleportation_factor = 0.5, error_tolerance = 0.1):
-    # generate new data
-    _,data_matrix = generate_spirals(verbose = False) #n_pts = 50,  start_theta = np.pi/5, num_rotations = 0.9, verbose = False)
-    plt.plot(data_matrix[:,0], data_matrix[:,1],'o')
-    plt.show()
-
-    # build a hypergraph from k-nearest-nbs of each point
-    k = 5
-    knn_hgraph_dict = build_knn_hypergraph(data_matrix,k)
-    n = knn_hgraph_dict['n']
-    m = knn_hgraph_dict['m']
-    k = knn_hgraph_dict['degree']
-    hypergraph = knn_hgraph_dict['hypergraph']
-
-    # build the Gaussian kernel associated w/data e^-alpha*||x_i-x_j||^2
-    bandwidth = 10e-3
-    K = np.exp(-bandwidth*np.square(pairwise_distances(data_matrix)))
-
-    # create an s vector proportionate to label vector, with num_rand_seeds randomly chosen true labels
-    num_rand_seeds = int(0.1*n)
-    seeded_labels = np.full(shape=(n,1),fill_value = 0)
-    random_seeds = np.random.choice(np.arange(n),size = num_rand_seeds)
-    seeded_labels[random_seeds[random_seeds < n/2]] = -1
-    seeded_labels[random_seeds[random_seeds > n/2]] = 1
-
-    D = np.full(shape=n,fill_value=k)
+"""
+EXPERIMENTS
+"""
+# Given a hypergraph and a vector of seeded labels, perform semi-supervised clustering.
+# If method==PPR, compute the personalized page-rank vector, initialized at 0 and using the appropriate s-vector from seeded_labels
+# If method==diffusion, initialize at seeded_labels and diffuse values
+# Can use cardinality-based cut function or mutual information. If using cardinality-based, can use the general Lovasz implementation
+# or the specialized (max-min) implementation. The latter is faster. If using mutual information, default is a Gaussian kernel constructed
+# using distances in data_matrix and parameter bandwidth.
+# When using mutual information, in general instances with more datapoints will perform better under smaller bandwidth. However, too small
+# a bandwidth will result in slowed or even failed convergence.
+def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data_matrix = None, method = 'PPR', iterations = 50,
+                        objective = 'cardinality', implementation = 'specialized', parallelized = False, error_tolerance = 0.1, 
+                         bandwidth = 0.1):
+    hypergraph = hypergraph_dict['hypergraph']
+    n = hypergraph_dict['n']
+    m = hypergraph_dict['m']
 
     if method=='diffusion':
         step_size = 0.1
@@ -275,32 +266,70 @@ def submodular_semisupervised_clustering(method='PPR', teleportation_factor = 0.
         s_vector = np.zeros_like(x0)
 
     elif method=='PPR':
+        teleportation_factor = 0.5
         x0 = np.zeros_like(seeded_labels)
         s_vector = seeded_labels
         effective_lambda = 2*teleportation_factor/(1-teleportation_factor)
         step_size = error_tolerance/(2*(1+effective_lambda))
 
-    # Some options for hyperedge cut functions:
-    # Cardinality based cut function, implemented with greedy Lovasz extension computation (slower)
-    cardinality_cut_func = lambda *args, **kwargs : submodular_subgradient(cardinality_cut_fn, *args, **kwargs)
-    # Mutual information: initialize a dictionary to store logdet evals, hashed by set
-    # logdet_dict = dict()
-    # logdet_dict['utilized'] = 0 # save a count of how often we're looking up logdets, for my reference
-    # MI_h = lambda S, h: mutual_information(S, h, K, logdet_dict)
-    # MI_cut_func = lambda *args, **kwargs : submodular_subgradient(MI_h, *args, **kwargs)
-    MI_cut_func = lambda *args, **kwargs : parallelized_mutual_info_subgradient(K, *args, **kwargs)
+    if objective=='cardinality':
+        if implementation=='specialized':
+            cut_func = diffusion_functions['infinity']
+        else:
+            if parallelized:
+                # Cardinality based cut function, implemented with greedy Lovasz extension computation (slower)
+                cut_func = lambda *args, **kwargs : submodular_subgradient(cardinality_cut_fn, *args, **kwargs)
+            else:
+                # Cardinality based cut function, implemented with greedy Lovasz extension computation (slower)
+                cut_func = lambda *args, **kwargs : submodular_subgradient(cardinality_cut_fn, parallelize=False, *args, **kwargs)
+
+    if objective=='mutual_information':
+        # build the Gaussian kernel associated w/data e^-alpha*||x_i-x_j||^2
+        K = np.exp(-bandwidth*np.square(pairwise_distances(data_matrix)))
+        if parallelized:
+            cut_func = lambda *args, **kwargs : parallelized_mutual_info_subgradient(K, *args, **kwargs)
+        else:
+            # if not using parallelized version: initialize a dictionary to store logdet evals, hashed by set
+            logdet_dict = dict()
+            logdet_dict['utilized'] = 0 # save a count of how often we're looking up logdets, for my reference
+            MI_h = lambda S, h: mutual_information(S, h, K, logdet_dict)
+            cut_func = lambda *args, **kwargs : submodular_subgradient(MI_h, parallelize=False, *args, **kwargs)
+    
+    _, x, _ ,_ = diffusion(x0, n, m, D, hypergraph, weights=None, func = cut_func,
+                            h = step_size, s=s_vector, T=iterations, verbose=True)
+    if method=='diffusion':
+        estimated_labels = x[-1]
+    elif method=='PPR':
+        estimated_labels = (1-error_tolerance/2)*np.sum(x, axis = 0).flatten()
+    return estimated_labels
+
+"""
+DEMOS
+
+Examples showing how to call the above to conduct semi-supervised learning experiments.
+"""
+def semi_supervised_demo():
+    data_matrix, knn_hgraph_dict, D, seeded_labels = small_example_knn_hypergraph()
+
+    estimated_labels = submodular_semisupervised_clustering(knn_hgraph_dict, seeded_labels, D, data_matrix = data_matrix, method = 'PPR', 
+                        objective = 'cardinality', implementation = 'specialized', parallelized = False, error_tolerance = 0.1)
+
+    _, ax = plt.subplots()
+    plot_label_comparison_binary(ax, estimated_labels, data_matrix)
+    plt.show()
+
+# build a hypergraph and compute subgradients for a generic submodular hyperedge cut fn
+# Uses an objective cut_func(S, h) which is assumed to take in sets S and h and be submodular.
+def compare_cardinality_and_MI(method='PPR', teleportation_factor = 0.5, error_tolerance = 0.1):
+    data_matrix, knn_hgraph_dict, D, seeded_labels = small_example_knn_hypergraph()
 
     # for our hypergraph, first specify the edge objective function
-    for cut_func, title in [(MI_cut_func,'mutual information'),(cardinality_cut_func,'cardinality-based')]:
-        _, x, _ ,_ = diffusion(x0, n, m, D, hypergraph, weights=None, func = cut_func,
-                                h = step_size, s=s_vector, T=10, verbose=True)
-        if method=='diffusion':
-            estimated_labels = x[-1]
-        elif method=='PPR':
-            estimated_labels = (1-error_tolerance/2)*np.sum(x, axis = 0).flatten()
-
+    for objective in ['mutual_information','cardinality']:
+        estimated_labels = submodular_semisupervised_clustering(knn_hgraph_dict, seeded_labels, D, data_matrix = data_matrix,
+                                                             method = method, objective = objective, implementation = 'specialized',
+                                                              parallelized = False, error_tolerance = 0.1)
         _, ax = plt.subplots()
-        plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring=title)
+        plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring=objective)
         plt.show()
 
-submodular_semisupervised_clustering()
+compare_cardinality_and_MI()
