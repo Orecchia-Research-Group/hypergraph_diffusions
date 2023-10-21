@@ -225,6 +225,8 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=0, center_id=None,
 
     if verbose > 0:
         print(f'Average degree = {sum(D) / n:.3f}. Average rank = {sum(rank) / m:.3f}')
+    if s is None:
+        s = np.zeros_like(x0)
     x = [x0]
     fx = []
     y = []
