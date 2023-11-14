@@ -373,21 +373,26 @@ Methods for assessing the performance of estimates produced by diffusions.
 
 
 def make_sweep_cut(vector, threshold):
-    mask = np.full(shape=vector.shape, fill_value=np.nan)
+    mask = np.full(shape=vector.shape, fill_value=np.nan, dtype=int)
     mask[np.where(vector <= threshold)] = -1
     mask[np.where(vector > threshold)] = 1
     return mask
 
 
-def sweep_cut_classification_error(label_estimates):
+def sweep_cut_classification_error(label_estimates, labels=None):
     n = label_estimates.shape[0]
-    n_pts = int(n / 2)
-    labels = np.hstack([np.full(shape=n_pts, fill_value=-1), np.full(shape=n_pts, fill_value=1)])
-    return sum(np.reshape(label_estimates, newshape=(n)) != labels) / n
+    if labels is None:
+        labels = np.hstack([-np.ones(n // 2, int), np.ones(n - n // 2, int)])
+    label_estimates = label_estimates.reshape(-1)
+    labels = labels.reshape(-1)
+    correct_rate = (label_estimates == labels).sum() / n
+    if (len(np.unique(labels)) == 2) and (correct_rate > 1 / 2):
+        correct_rate = 1 - correct_rate
+    return correct_rate
 
 
-def find_min_sweepcut(node_values, resolution, cut_objective_function, orthogonality_constraint='auto'):
-    ascending_node_values = np.unique(node_values)
+def find_min_sweepcut(node_values, resolution, cut_objective_function, orthogonality_constraint='auto', labels=None):
+    ascending_node_values = sorted(np.unique(node_values))
     # sweep from lowest nontrivial cut to highest nontrivial cut
     low = ascending_node_values[1]
     high = ascending_node_values[-2]
@@ -404,13 +409,19 @@ def find_min_sweepcut(node_values, resolution, cut_objective_function, orthogona
 
     for threshold in sweep_vals:
         label_estimates = make_sweep_cut(node_values, threshold)
-        objective_value = cut_objective_function(label_estimates)
+        objective_value = cut_objective_function(label_estimates, labels=labels)
         orthogonality_error = np.abs(np.sum(label_estimates) / len(label_estimates))
 
         if objective_value < min_observed_value and orthogonality_error < orthogonality_constraint:
             min_observed_value = objective_value
             best_threshold = threshold
     return min_observed_value, best_threshold
+
+
+def multiclassification_error(label_estimates, labels):
+    n = label_estimates.shape[0]
+    estimation = np.argmax(label_estimates, axis=1)
+    return (estimation != labels).sum() / n
 
 
 """
@@ -522,12 +533,13 @@ Specific visualizations for figures in paper.
 """
 
 
-def plot_label_comparison_binary(ax, label_vector, data_matrix, titlestring=None):
+def plot_label_comparison_binary(ax, label_vector, data_matrix, titlestring=None, labels=None):
+    colors = np.array(['tab:red', 'tab:blue', 'orange'])
     sweep_cut_resolution = 100
-    error, threshold = find_min_sweepcut(label_vector, sweep_cut_resolution, sweep_cut_classification_error)
+    error, threshold = find_min_sweepcut(label_vector, sweep_cut_resolution, sweep_cut_classification_error, labels=labels)
     label_estimates = make_sweep_cut(label_vector, threshold)
-    error = sweep_cut_classification_error(label_estimates)
-    im = ax.scatter(data_matrix[:, 0], data_matrix[:, 1], c=label_estimates.reshape(-1))
+    error = sweep_cut_classification_error(label_estimates, labels=labels)
+    im = ax.scatter(data_matrix[:, 0], data_matrix[:, 1], c=colors[label_estimates])
 
     # figure formatting
     ax.set_aspect('equal')
@@ -540,7 +552,7 @@ def plot_label_comparison_binary(ax, label_vector, data_matrix, titlestring=None
         ax.set_title(f'Classification error = {error:.3f}', fontsize=15)
     elif titlestring is not None:
         ax.set_title(titlestring + f'\n Classification error = {error:.3f}', fontsize=15)
-    return
+    return error
 
 
 def final_plot_AUC_hist(AUC_vals, ax, decorated=False, titlestring=None):

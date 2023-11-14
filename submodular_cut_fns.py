@@ -2,7 +2,8 @@
 Computing diffusions for arbitrary submodular cut functions
 
 """
-
+import argparse
+import os
 import pdb
 from multiprocessing import Pool
 
@@ -10,7 +11,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import pairwise_distances
 
-from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary, small_example_knn_hypergraph
+from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary, small_example_knn_hypergraph, multiclassification_error
+import reading
 from diffusion_functions import *
 
 """
@@ -277,7 +279,8 @@ EXPERIMENTS
 
 def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data_matrix=None, method='PPR',
                                          iterations=50, objective='cardinality', implementation='specialized',
-                                         parallelized=False, error_tolerance=0.1, bandwidth=0.1):
+                                         parallelized=False, error_tolerance=0.1, bandwidth=0.1, return_x=False,
+                                         verbose=0):
     """Given a hypergraph and a vector of seeded labels, perform semi-supervised clustering.
     If method==PPR, compute the personalized page-rank vector, initialized at 0 and using the appropriate s-vector from seeded_labels
     If method==diffusion, initialize at seeded_labels and diffuse values
@@ -327,11 +330,13 @@ def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data
             cut_func = lambda *args, **kwargs: submodular_subgradient(MI_h, parallelize=False, *args, **kwargs)
 
     _, x, _, _ = diffusion(x0, n, m, D, hypergraph, weights=None, func=cut_func,
-                           h=step_size, s=s_vector, T=iterations, verbose=True)
+                           h=step_size, s=s_vector, T=iterations, verbose=verbose)
     if method == 'diffusion':
         estimated_labels = x[-1]
     elif method == 'PPR':
-        estimated_labels = (1-error_tolerance/2)*np.sum(x, axis=0).flatten()
+        estimated_labels = (1-error_tolerance/2)*np.sum(x, axis=0)
+    if return_x:
+        return estimated_labels, x
     return estimated_labels
 
 
@@ -370,4 +375,89 @@ def compare_cardinality_and_MI(method='PPR', teleportation_factor=0.5, error_tol
         plt.show()
 
 
-compare_cardinality_and_MI()
+def parse_args():
+    methods = ['PPR', 'diffusion']
+    objectives = ['cardinality', 'mutual_information']
+    implementations = ['specialized', 'generic']
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-g', '--graph', type=str, default='zoo', help='Base name of the graph(s) to process.', nargs='+')
+    parser.add_argument('--minimum-samples', type=int, default=20, help='Starting number of seeded samples.', nargs='+')
+    parser.add_argument('--step', type=int, default=20, help='Number of labels to add at each step.', nargs='+')
+    parser.add_argument('--maximum-samples', type=int, default=200, help='Maximum number of seeded samples.', nargs='+')
+    parser.add_argument('--method', type=str, default=methods[0], choices=methods, help='Method to use for diffusion.')
+    parser.add_argument('--objective', type=str, default=objectives[0], choices=objectives, help='Objective to use.')
+    parser.add_argument('--implementation', type=str, default=implementations[0], choices=implementations, help='Specialized implementation is the infinity function from diffusion_functions, otherwise use the generic one here.')
+    parser.add_argument('--error-tolerance', type=float, default=0.1, help='Error tolerance affects step size since the infinity cut function is not smooth.')
+    parser.add_argument('-T', '--iterations', type=int, default=50, help='Maximum iterations while trying to compute diffusion.')
+    parser.add_argument('--repeats', type=int, default=10, help='Number of experiment repetitions to estimate average and standard deviation')
+    parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    args = parse_args()
+    print(args)
+    np.random.seed(42)
+
+    for gi, graph_name in enumerate(args.graph):
+        hmetis_filename = f'{graph_name}.hmetis'
+        label_filename = f'{graph_name}.label'
+        dataset_name = os.path.splitext(os.path.basename(hmetis_filename))[0]
+        print(f'{dataset_name:15s} &', ' & '.join([f'{samples:13d}' for samples in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi])]), r'\\')
+        n, m, node_weights, hypergraph, weights, center_id, hypergraph_node_weights = reading.read_hypergraph(hmetis_filename)
+        label_names, labels = reading.read_labels(label_filename)
+        labels = np.array(labels, int)
+        hgraph_dict = {
+            'n': n,
+            'm': m,
+            'degree': node_weights,
+            'hypergraph': hypergraph,
+            'labels': labels,
+            'label_names': label_names
+        }
+        total_errors = []
+        unique_labels = np.unique(labels)
+        labeled_indices = [np.where(labels == l)[0] for l in unique_labels]
+        true_labels = np.zeros_like(labels)
+        for j, li in enumerate(labeled_indices):
+            true_labels[li] = j
+
+        for r in range(args.repeats):
+            errors = []
+            for li in labeled_indices:
+                np.random.shuffle(li)
+            seeds = np.zeros((n, len(unique_labels)))
+
+            for top in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi]):
+                if args.verbose > 0:
+                    print(r+1, top)
+                for j, li in enumerate(labeled_indices):
+                    for k in range(len(unique_labels)):
+                        seeds[li[:top], k] = [-1, 1][j == k]
+                estimated_labels, x = submodular_semisupervised_clustering(hgraph_dict, seeds, node_weights,
+                                                                           method=args.method, objective=args.objective,
+                                                                           implementation=args.implementation,
+                                                                           parallelized=False,
+                                                                           error_tolerance=args.error_tolerance,
+                                                                           return_x=True, iterations=args.iterations,
+                                                                           verbose=args.verbose)
+                errors.append(multiclassification_error(estimated_labels, true_labels))
+                # _, ax = plt.subplots()
+                # data_matrix = np.stack((x[-1], x[-2]), axis=1)
+                # errors.append(plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring='cardinality', labels=labels))
+                # plt.savefig(f'data/Paper_results/{dataset_name}_{20*(i+1):03d}', dpi=300)
+                # plt.close()
+            total_errors.append(errors)
+        total_errors = np.array(total_errors) * 100
+        # print(total_errors)
+        averages = total_errors.mean(axis=0)
+        stds = total_errors.std(axis=0)
+        print(f'{"Our method":15s} &', ' & '.join([f'{a:5.2f} ± {s:5.2f}' for a, s in zip(averages, stds)]), end=' \\\\\n' if gi < len(args.graph) - 1 else '\n')
+
+
+if __name__ == '__main__':
+    main()
+
+#compare_cardinality_and_MI()

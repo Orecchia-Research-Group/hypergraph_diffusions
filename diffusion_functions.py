@@ -174,6 +174,8 @@ def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_n
     y = np.zeros((len(rank), x.shape[-1]))
     fx = np.zeros(x.shape[-1])
     for i, e in enumerate(hypergraph):
+        if len(e) == 0:
+            continue
         xe = x[e]
         we = np.array(hypergraph_node_weights[tuple(e)])
         de = degree[e]
