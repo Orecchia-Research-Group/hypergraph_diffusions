@@ -13,6 +13,7 @@ from sklearn.neighbors import NearestNeighbors, kneighbors_graph
 import json
 from datetime import datetime
 from tqdm import tqdm
+from itertools import combinations
 
 from diffusion_functions import *
 from animate_diffusion import animate_diffusion
@@ -132,13 +133,19 @@ Assumes that data_matrix is n x 2, and that the first n/2 rows correspond
  to community 1, second n/2 rows correspond to community 2.
 """
 
-
-def build_knn_graph(data_matrix, k):
-    return kneighbors_graph(data_matrix, k, mode='connectivity', include_self=True)
+# assumes each node has index [0,n]
+def unweighted_degree(n, hypergraph):
+    # count unweighted degrees
+    degree_dict = dict(zip(np.arange(n), np.zeros(n)))
+    for hedge in hypergraph:
+        for v in hedge:
+            degree_dict[v]+=1
+    return degree_dict
 
 
 def build_knn_hypergraph(data_matrix, k):
-    nbrs = NearestNeighbors(n_neighbors=k, algorithm='ball_tree').fit(data_matrix)
+    # first neighbor returned is always the node itself, so take k+1 to get k true neighbors
+    nbrs = NearestNeighbors(n_neighbors=k+1, algorithm='ball_tree').fit(data_matrix)
     _, indices = nbrs.kneighbors(data_matrix)
 
     n = data_matrix.shape[0]
@@ -152,9 +159,44 @@ def build_knn_hypergraph(data_matrix, k):
     label_names = dict({0: 'spiral_1', 1: 'sprial_2'})
 
     # node_dict, labels, label_names
-    return dict({'n': n, 'm': m, 'degree': k, 'hypergraph': hypergraph,
+    return dict({'n': n, 'm': m, 'degree': unweighted_degree(n, hypergraph), 'hypergraph': hypergraph,
                  'node_dict': node_dict, 'labels': labels, 'label_names': label_names})
 
+# builds a 2-hypergraph with a hyperedge between a node and each of its k nearest neighbors
+def build_knn_hypergraph_star_expansion(data_matrix, k):
+    # first neighbor returned is always the node itself, so take k+1 to get k true neighbors
+    nbrs = NearestNeighbors(n_neighbors=k+1, algorithm='ball_tree').fit(data_matrix)
+    _, indices = nbrs.kneighbors(data_matrix)
+
+    n = data_matrix.shape[0]
+    m = k*indices.shape[0]
+    star_hypergraph = []
+    for hedge_list in list(indices):
+        # first entry in each list is the node whose neighbors we're considering
+        center = hedge_list[0]
+        star_hypergraph.extend([(center,neighbor) for neighbor in hedge_list[1:]])
+
+    # the 'node dict' is the trivial one?
+    node_dict = dict(zip(np.arange(n), np.arange(n)))
+    # label all pts in spiral 1 as 0, label all pts in spiral 2 as 1
+    labels = np.hstack([np.full(shape=int(n / 2), fill_value=-1), np.full(shape=int(n / 2), fill_value=1)])
+    label_names = dict({0: 'spiral_1', 1: 'sprial_2'})
+
+    # node_dict, labels, label_names
+    return dict({'n': n, 'm': m, 'degree': unweighted_degree(n, star_hypergraph), 'hypergraph': star_hypergraph,
+                 'node_dict': node_dict, 'labels': labels, 'label_names': label_names})
+
+def build_knn_graph(data_matrix, k):
+    star_hgraph_dict = build_knn_hypergraph_star_expansion(data_matrix, k)
+    # build networkx graph, updating edge weights when edges ocurr multiple times
+    G = nx.Graph()
+    for (u,v) in star_hgraph_dict['hypergraph']:
+        if G.has_edge(u,v):
+            G[u][v]['weight']+=1
+        else:
+            G.add_edge(u,v, weight=1)
+    n = data_matrix.shape[0]
+    return nx.adjacency_matrix(G, nodelist = list(range(n)))
 
 """
 GRAPH DIFFUSION
@@ -209,7 +251,7 @@ def graph_diffusion(x0, D, A, s=None, h=0.5, T=100, verbose=True):
         print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
     for t in range(T):
         grad = L @ x_k - s
-        x_k = x_k - h * grad
+        x_k = x_k - h * D_inv @ grad
         x = np.append(x, np.reshape(x_k, newshape=(1, n)), axis=0)
         y = np.append(y, np.reshape(grad, newshape=(1, n)), axis=0)
         fx.append(graph_quadratic(L, x_k))
@@ -242,10 +284,10 @@ def diffusion_knn_clustering(knn_adj_matrix, knn_hgraph_dict,
     # let's extract some parameters
     n = knn_hgraph_dict['n']
     m = knn_hgraph_dict['m']
-    k = knn_hgraph_dict['degree']
     hypergraph = knn_hgraph_dict['hypergraph']
 
-    D = np.full(shape=n, fill_value=k)
+    degree_dict = knn_hgraph_dict['degree']
+    D = np.array([degree_dict[v] for v in range(n)])
 
     # create an initial pt with num_rand_seeds randomly chosen true labels
     x0 = np.full(shape=(n, 1), fill_value=0)
@@ -284,10 +326,10 @@ def PPR_knn_clustering(knn_adj_matrix, knn_hgraph_dict, error_tolerance=0.1,
     # let's extract some parameters
     n = knn_hgraph_dict['n']
     m = knn_hgraph_dict['m']
-    k = knn_hgraph_dict['degree']
-    hypergraph = knn_hgraph_dict['hypergraph']
+    hypergraph = hypergraph['hypergraph']
 
-    D = np.full(shape=n, fill_value=k)
+    degree_dict = knn_hgraph_dict['degree']
+    D = np.array([degree_dict[v] for v in range(n)])
 
     # create an s vector proportionate to label vector, with num_rand_seeds randomly chosen true labels
     seeded_labels = np.full(shape=(n, 1), fill_value=0)
@@ -439,7 +481,8 @@ def small_example_knn_hypergraph():
     k = 5
     knn_hgraph_dict = build_knn_hypergraph(data_matrix, k)
     n = knn_hgraph_dict['n']
-    D = np.full(shape=n, fill_value=k)
+    degree_dict = knn_hgraph_dict['degree']
+    D = np.array([degree_dict[v] for v in range(n)])
 
     # create an s vector proportionate to label vector, with num_rand_seeds randomly chosen true labels
     num_rand_seeds = int(0.1 * n)
@@ -578,6 +621,19 @@ def final_plot_AUC_hist(AUC_vals, ax, decorated=False, titlestring=None):
     ax.spines["right"].set_visible(False)
     ax.tick_params(axis='x', labelsize=15)
     ax.tick_params(axis='y', labelsize=15)
+    return
+
+
+def visualize_hyperedges(data_matrix, hypergraph):
+    fig, ax = plt.subplots(figsize = (10,10))
+    im = ax.scatter(data_matrix[:, 0], data_matrix[:, 1])  
+    color_cycle = ax._get_lines.prop_cycler
+    for hedge in hypergraph:
+        color = next(color_cycle)['color']
+        pairs = list(combinations(hedge, 2))
+        for pair in pairs:
+            plt.plot(data_matrix[pair, 0],data_matrix[pair, 1], linestyle="--",color = color)
+    plt.show()
     return
 
 # compare_estimated_labels(method='PPR', generate_data = generate_spirals, k=5, num_iterations = 10)
