@@ -435,7 +435,7 @@ def main():
                     print(r+1, top)
                 for j, li in enumerate(labeled_indices):
                     for k in range(len(unique_labels)):
-                        seeds[li[:top], k] = [-1, 1][j == k]
+                        seeds[li[:top], k] = [-1 / (len(unique_labels) - 1), 1][j == k]
                 estimated_labels, x = submodular_semisupervised_clustering(hgraph_dict, seeds, node_weights,
                                                                            method=args.method, objective=args.objective,
                                                                            implementation=args.implementation,
