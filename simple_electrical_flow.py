@@ -183,7 +183,5 @@ def main():
         print(f"Hyperedge {edge_names[i]} has effective conductance {1 / C_eff[e]:.3f} for pair ({names[C_eff_arg[e][0]]}, {names[C_eff_arg[e][1]]})")
 
 
-
-
 if __name__ == '__main__':
     main()

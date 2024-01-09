@@ -11,6 +11,7 @@ import pandas as pd
 from scipy.io import loadmat
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_BUCKETS = 10
 
 
 def convert_fauci_email(input_directory, verbose=0, **kwargs):
@@ -508,7 +509,7 @@ def generate_newsgroups(input_directory, verbose=0, **kwargs):
     return n, len(hypergraph), degree, hypergraph, None, None, labels, label_names, None, None
 
 
-def generate_covertype(input_directory, types=(4, 5), verbose=0, **kwargs):
+def generate_covertype(input_directory, types=(4, 5), buckets=DEFAULT_BUCKETS, verbose=0, **kwargs):
     """Covertype
 
     Predicting forest cover type from cartographic variables only
@@ -524,8 +525,6 @@ def generate_covertype(input_directory, types=(4, 5), verbose=0, **kwargs):
     The dataset contains 12 numerical features, wilderness area
     as 4 binary columns and soil type as 40 binary columns.
     """
-    buckets = 10
-
     df = pd.read_csv(os.path.join(input_directory, 'covertype', 'covtype.data'), header=None)
     df = df.loc[df.loc[:, 54].isin(types)]
     n, f = df.shape
@@ -622,34 +621,43 @@ def parse_args():
     parser.add_argument('--suffix', help='Add at the end of the filenames to not overwrite for different settings', default='', type=str)
     parser.add_argument('-t', '--types', help='Covertypes that should be kept for 1-7. Popular datasets are from (4, 5) and (6, 7)',
                         default=(4, 5), type=int, nargs='+')
+    parser.add_argument('-b', '--buckets', help='Number of buckets to use for non-categorical data. Default value is 10 and will not be appended to dataset name.', default=None, type=int, nargs='+')
     args = parser.parse_args()
-    return args.input_directory, args.output_directory, args.names, args.verbose, args.force, args.suffix, args.types
+    return args.input_directory, args.output_directory, args.names, args.verbose, args.force, args.suffix, args.types, args.buckets
 
 
 def main():
-    input_directory, output_directory, names, verbose, force, suffix, types = parse_args()
+    input_directory, output_directory, names, verbose, force, suffix, types, buckets = parse_args()
     print(input_directory)
+    if buckets is None:
+        buckets = [DEFAULT_BUCKETS]
     for name in names:
-        hmetis_filename = os.path.join(output_directory, f'{name}{suffix}.hmetis')
-        dict_filename = os.path.join(output_directory, f'{name}{suffix}.dict')
-        label_filename = os.path.join(output_directory, f'{name}{suffix}.label')
-        if not force and os.path.exists(hmetis_filename):
-            if verbose > 0:
-                print(f'File {hmetis_filename} exists.')
-                print(f'Skipping processing for {name}{suffix}.')
-            continue
-        if name not in CONVERSION_FUNCTION:
-            if verbose > 0:
-                print(f'There is no conversion function registered for hypergraph {name}.', file=sys.stderr)
-            continue
-        function = CONVERSION_FUNCTION[name]
-        n, m, degree, hypergraph, weights, node_dict, labels, label_names, center_id, hypergraph_node_weights = function(input_directory, verbose=verbose, types=types)
-        if hypergraph is None:
-            print(f'Unable to load {name} from {input_directory}. Check files.')
-            continue
-        write_hypergraph(hmetis_filename, n, m, degree, hypergraph, weights, center_id, hypergraph_node_weights)
-        write_node_dict(dict_filename, node_dict)
-        write_labels(label_filename, label_names, labels)
+        for b in buckets:
+            if b == DEFAULT_BUCKETS and len(buckets) == 1:
+                hmetis_filename = os.path.join(output_directory, f'{name}{suffix}.hmetis')
+                dict_filename = os.path.join(output_directory, f'{name}{suffix}.dict')
+                label_filename = os.path.join(output_directory, f'{name}{suffix}.label')
+            else:
+                hmetis_filename = os.path.join(output_directory, f'{name}{suffix}_{b:04d}.hmetis')
+                dict_filename = os.path.join(output_directory, f'{name}{suffix}_{b:04d}.dict')
+                label_filename = os.path.join(output_directory, f'{name}{suffix}_{b:04d}.label')
+            if not force and os.path.exists(hmetis_filename):
+                if verbose > 0:
+                    print(f'File {hmetis_filename} exists.')
+                    print(f'Skipping processing for {name}{suffix}.')
+                continue
+            if name not in CONVERSION_FUNCTION:
+                if verbose > 0:
+                    print(f'There is no conversion function registered for hypergraph {name}.', file=sys.stderr)
+                continue
+            function = CONVERSION_FUNCTION[name]
+            n, m, degree, hypergraph, weights, node_dict, labels, label_names, center_id, hypergraph_node_weights = function(input_directory, verbose=verbose, types=types, buckets=b)
+            if hypergraph is None:
+                print(f'Unable to load {name} from {input_directory}. Check files.')
+                continue
+            write_hypergraph(hmetis_filename, n, m, degree, hypergraph, weights, center_id, hypergraph_node_weights)
+            write_node_dict(dict_filename, node_dict)
+            write_labels(label_filename, label_names, labels)
 
 
 def __init__():
