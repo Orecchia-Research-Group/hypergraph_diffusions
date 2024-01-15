@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import pairwise_distances
 
-from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary, small_example_knn_hypergraph, multiclassification_error
+from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary, small_example_knn_hypergraph, multiclassification_error, multiclassification_error_from_x
 import reading
 from diffusion_functions import *
 
@@ -332,14 +332,14 @@ def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data
             MI_h = lambda S, h: mutual_information(S, h, K, logdet_dict)
             cut_func = lambda *args, **kwargs: submodular_subgradient(MI_h, parallelize=False, *args, **kwargs)
 
-    _, x, _, _ = diffusion(x0, n, m, D, hypergraph, weights=None, func=cut_func,
+    t, x, _, _ = diffusion(x0, n, m, D, hypergraph, weights=None, func=cut_func,
                            h=step_size, s=s_vector, T=iterations, verbose=verbose)
     if method == 'diffusion':
         estimated_labels = x[-1]
     elif method == 'PPR':
         estimated_labels = (1-error_tolerance/2)*np.sum(x, axis=0)
     if return_x:
-        return estimated_labels, x
+        return estimated_labels, t, x
     return estimated_labels
 
 
@@ -396,7 +396,10 @@ def parse_args():
     parser.add_argument('--repeats', type=int, default=10, help='Number of experiment repetitions to estimate average and standard deviation')
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     parser.add_argument('-b', '--buckets', help='List of number of buckets to use. Assumes that these datasets have been generated.', type=int, nargs='+', default=None)
+    parser.add_argument('-f', '--filename', type=str, default=None, help='Filename to save results. If `None`, will use "results yyymmddhhMM.csv".')
     args = parser.parse_args()
+    if args.filename is None:
+        args.filename = f'results_{datetime.now().strftime("%Y%m%d%H%M")}.csv'
     return args
 
 
@@ -404,68 +407,71 @@ def main():
     args = parse_args()
     print(args)
     np.random.seed(42)
+    with open(args.filename, 'w+') as result_output:
+        print('Graph Name,buckets,repeat,seeds,iteration,time,error', file=result_output)
+        if args.buckets is None:
+            args.buckets = [DEFAULT_BUCKETS]
+        for gi, graph_name in enumerate(args.graph):
+            for b in args.buckets:
+                if b == DEFAULT_BUCKETS and len(args.buckets) == 1:
+                    hmetis_filename = f'{graph_name}.hmetis'
+                    label_filename = f'{graph_name}.label'
+                else:
+                    hmetis_filename = f'{graph_name}_{b:04d}.hmetis'
+                    label_filename = f'{graph_name}_{b:04d}.label'
+                dataset_name = os.path.splitext(os.path.basename(hmetis_filename))[0]
+                print(f'{dataset_name:15s} &', ' & '.join([f'{samples:13d}' for samples in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi])]), r'\\')
+                n, m, node_weights, hypergraph, weights, center_id, hypergraph_node_weights = reading.read_hypergraph(hmetis_filename)
+                label_names, labels = reading.read_labels(label_filename)
+                labels = np.array(labels, int)
+                hgraph_dict = {
+                    'n': n,
+                    'm': m,
+                    'degree': node_weights,
+                    'hypergraph': hypergraph,
+                    'labels': labels,
+                    'label_names': label_names
+                }
+                total_errors = []
+                unique_labels = np.unique(labels)
+                labeled_indices = [np.where(labels == l)[0] for l in unique_labels]
+                true_labels = np.zeros_like(labels)
+                for j, li in enumerate(labeled_indices):
+                    true_labels[li] = j
 
-    if args.buckets is None:
-        args.buckets = [DEFAULT_BUCKETS]
-    for gi, graph_name in enumerate(args.graph):
-        for b in args.buckets:
-            if b == DEFAULT_BUCKETS and len(args.buckets) == 1:
-                hmetis_filename = f'{graph_name}.hmetis'
-                label_filename = f'{graph_name}.label'
-            else:
-                hmetis_filename = f'{graph_name}_{b:04d}.hmetis'
-                label_filename = f'{graph_name}_{b:04d}.label'
-            dataset_name = os.path.splitext(os.path.basename(hmetis_filename))[0]
-            print(f'{dataset_name:15s} &', ' & '.join([f'{samples:13d}' for samples in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi])]), r'\\')
-            n, m, node_weights, hypergraph, weights, center_id, hypergraph_node_weights = reading.read_hypergraph(hmetis_filename)
-            label_names, labels = reading.read_labels(label_filename)
-            labels = np.array(labels, int)
-            hgraph_dict = {
-                'n': n,
-                'm': m,
-                'degree': node_weights,
-                'hypergraph': hypergraph,
-                'labels': labels,
-                'label_names': label_names
-            }
-            total_errors = []
-            unique_labels = np.unique(labels)
-            labeled_indices = [np.where(labels == l)[0] for l in unique_labels]
-            true_labels = np.zeros_like(labels)
-            for j, li in enumerate(labeled_indices):
-                true_labels[li] = j
+                for r in range(args.repeats):
+                    errors = []
+                    for li in labeled_indices:
+                        np.random.shuffle(li)
+                    seeds = np.zeros((n, len(unique_labels)))
 
-            for r in range(args.repeats):
-                errors = []
-                for li in labeled_indices:
-                    np.random.shuffle(li)
-                seeds = np.zeros((n, len(unique_labels)))
-
-                for top in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi]):
-                    if args.verbose > 0:
-                        print(r+1, top)
-                    for j, li in enumerate(labeled_indices):
-                        for k in range(len(unique_labels)):
-                            seeds[li[:top], k] = [-1 / (len(unique_labels) - 1), 1][j == k]
-                    estimated_labels, x = submodular_semisupervised_clustering(hgraph_dict, seeds, node_weights,
-                                                                               method=args.method, objective=args.objective,
-                                                                               implementation=args.implementation,
-                                                                               parallelized=False,
-                                                                               error_tolerance=args.error_tolerance,
-                                                                               return_x=True, iterations=args.iterations,
-                                                                               verbose=args.verbose)
-                    errors.append(multiclassification_error(estimated_labels, true_labels))
-                    # _, ax = plt.subplots()
-                    # data_matrix = np.stack((x[-1], x[-2]), axis=1)
-                    # errors.append(plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring='cardinality', labels=labels))
-                    # plt.savefig(f'data/Paper_results/{dataset_name}_{20*(i+1):03d}', dpi=300)
-                    # plt.close()
-                total_errors.append(errors)
-            total_errors = np.array(total_errors) * 100
-            # print(total_errors)
-            averages = total_errors.mean(axis=0)
-            stds = total_errors.std(axis=0)
-            print(f'{"Our method":15s} &', ' & '.join([f'{a:5.2f} ± {s:5.2f}' for a, s in zip(averages, stds)]), end=' \\\\\n' if gi < len(args.graph) - 1 else '\n')
+                    for top in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi]):
+                        if args.verbose > 0:
+                            print(r+1, top)
+                        for j, li in enumerate(labeled_indices):
+                            for k in range(len(unique_labels)):
+                                seeds[li[:top], k] = [-1 / (len(unique_labels) - 1), 1][j == k]
+                        estimated_labels, t, x = submodular_semisupervised_clustering(hgraph_dict, seeds, node_weights,
+                                                                                   method=args.method, objective=args.objective,
+                                                                                   implementation=args.implementation,
+                                                                                   parallelized=False,
+                                                                                   error_tolerance=args.error_tolerance,
+                                                                                   return_x=True, iterations=args.iterations,
+                                                                                   verbose=args.verbose)
+                        errors.append(multiclassification_error_from_x(x, true_labels))
+                        for it, (time, err) in enumerate(zip(t, errors[-1])):
+                            print(f'{graph_name},{b},{r},{top},{it},{time},{err}', file=result_output)
+                        # _, ax = plt.subplots()
+                        # data_matrix = np.stack((x[-1], x[-2]), axis=1)
+                        # errors.append(plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring='cardinality', labels=labels))
+                        # plt.savefig(f'data/Paper_results/{dataset_name}_{20*(i+1):03d}', dpi=300)
+                        # plt.close()
+                    total_errors.append(errors)
+                total_errors = np.array(total_errors) * 100
+                # print(total_errors)
+                averages = total_errors.mean(axis=0)
+                stds = total_errors.std(axis=0)
+                # print(f'{"Our method":15s} &', ' & '.join([f'{a:5.2f} ± {s:5.2f}' for a, s in zip(averages, stds)]), end=' \\\\\n' if gi < len(args.graph) - 1 else '\n')
 
 
 if __name__ == '__main__':

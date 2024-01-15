@@ -466,6 +466,20 @@ def multiclassification_error(label_estimates, labels):
     return (estimation != labels).sum() / n
 
 
+def multiclassification_error_from_x(x, labels):
+    """Multi-classification error from x
+
+    Given x, produce the classification error
+    for the average iterate of x
+    """
+    errors = []
+    x_cs = np.cumsum(x, axis=0)
+    for tt in range(len(x_cs)):
+        x_cs[tt] /= (tt + 1)
+        errors.append(multiclassification_error(x_cs[tt], labels))
+    return errors
+
+
 """
 EXPERIMENTS 
 
