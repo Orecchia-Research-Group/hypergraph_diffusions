@@ -15,7 +15,7 @@ from matplotlib.animation import FuncAnimation
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import RidgeClassifier
-from sklearn.metrics import confusion_matrix, classification_report, plot_confusion_matrix
+from sklearn.metrics import confusion_matrix, classification_report     # , plot_confusion_matrix
 
 from diffusion_functions import diffusion_functions, diffusion
 import reading

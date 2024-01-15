@@ -11,6 +11,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import pairwise_distances
 
+import matplotlib
+matplotlib.use('Agg')
+
 from semi_supervised_manifold_learning import generate_spirals, build_knn_hypergraph, plot_label_comparison_binary, small_example_knn_hypergraph, multiclassification_error, multiclassification_error_from_x
 import reading
 from diffusion_functions import *
@@ -42,7 +45,7 @@ def unpack_sparse_hypergraph(sparse_h, rank):
 
 
 """
-SUBMODULAR OBJECTIVES 
+SUBMODULAR OBJECTIVES
 
 Some submodular functions for testing submodular evaluation utils.
 
