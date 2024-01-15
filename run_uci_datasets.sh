@@ -20,8 +20,9 @@ minimum_samples=(0 20 20 20 20 20)
 step=(0 5 20 20 20 20)
 maximum_samples=(0 50 200 200 200 200)
 
-for i in {1..5}
-do
-  echo "python submodular_cut_fns.py -g data/Paper_datasets/${graphs[$i]} --minimum-samples=$((minimum_samples[$i])) --step=$((step[$i])) --maximum-samples=$((maximum_samples[$i])) -T 200 --repeats=50 -f data/Paper_results/uci_runs.csv"
-  python submodular_cut_fns.py -g data/Paper_datasets/${graphs[$i]} --minimum-samples=$((minimum_samples[$i])) --step=$((step[$i])) --maximum-samples=$((maximum_samples[$i])) -T 200 --repeats=50 -f data/Paper_results/uci_runs.csv
-done
+#for i in {1..5}
+#do
+i=$1
+echo "python submodular_cut_fns.py -g data/Paper_datasets/${graphs[$i]} --minimum-samples=$((minimum_samples[$i])) --step=$((step[$i])) --maximum-samples=$((maximum_samples[$i])) -T 200 --repeats=50 -f data/Paper_results/uci_runs.csv"
+python submodular_cut_fns.py -g data/Paper_datasets/${graphs[$i]} --minimum-samples=$((minimum_samples[$i])) --step=$((step[$i])) --maximum-samples=$((maximum_samples[$i])) -T 200 --repeats=50 -f data/Paper_results/uci_runs_${graphs[$i]}.csv
+#done
