@@ -215,8 +215,10 @@ def added_terms(x, gradient, fx, D, s, f, beta):
     return gradient, fx
 
 
-def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=0, center_id=None, hypergraph_node_weights=None,
+def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=1, center_id=None, hypergraph_node_weights=None,
               func=nonvectorized_infinity, h=H, T=None, eps=EPS, regularizer=tuple(regularizers.keys())[0], verbose=0):
+    if lamda <= 0:
+        print('Warning: lamda <= 0. This will ignore the graph structure.')
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
     # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
@@ -241,10 +243,11 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=0, center_id=None,
     while True:
         # \nabla f(x) = \sum_h w_h \bar{\delta}_h (x)
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-        gradient -= s
-        gradient += (D * x[-1].T).T * lamda
-        new_fx -= (x[-1] * s).sum(axis=0)
-        new_fx += ((D * x[-1].T).T * x[-1]).sum(axis=0) * lamda / 2
+        new_fx *= lamda
+        gradient *= lamda
+        disagreement = x[-1] - s
+        gradient += (D * disagreement.T).T
+        new_fx += ((D * disagreement.T).T * disagreement).sum(axis=0) / 2
         # gradient -= gradient.sum(axis=0) / n
         y.append(new_y)
         fx.append(new_fx)
