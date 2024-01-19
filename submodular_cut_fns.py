@@ -286,7 +286,7 @@ EXPERIMENTS
 def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data_matrix=None, method='PPR',
                                          iterations=50, objective='cardinality', implementation='specialized',
                                          parallelized=False, error_tolerance=0.1, bandwidth=0.1, return_x=False,
-                                         verbose=0):
+                                         lamda=1, verbose=0):
     """Given a hypergraph and a vector of seeded labels, perform semi-supervised clustering.
     If method==PPR, compute the personalized page-rank vector, initialized at 0 and using the appropriate s-vector from seeded_labels
     If method==diffusion, initialize at seeded_labels and diffuse values
@@ -336,7 +336,7 @@ def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data
             cut_func = lambda *args, **kwargs: submodular_subgradient(MI_h, parallelize=False, *args, **kwargs)
 
     t, x, _, _ = diffusion(x0, n, m, D, hypergraph, weights=None, func=cut_func,
-                           h=step_size, s=s_vector, T=iterations, verbose=verbose)
+                           h=step_size, s=s_vector, T=iterations, lamda=lamda, verbose=verbose)
     if method == 'diffusion':
         estimated_labels = x[-1]
     elif method == 'PPR':
@@ -399,6 +399,7 @@ def parse_args():
     parser.add_argument('--repeats', type=int, default=10, help='Number of experiment repetitions to estimate average and standard deviation')
     parser.add_argument('-v', '--verbose', help='Verbose mode. Prints out useful information. Higher levels print more information.', action='count', default=0)
     parser.add_argument('-b', '--buckets', help='List of number of buckets to use. Assumes that these datasets have been generated.', type=int, nargs='+', default=None)
+    parser.add_argument('-l', '--lamda', type=float, help='λ weights for graph regularization.', nargs='+', default=[1])
     parser.add_argument('-f', '--filename', type=str, default=None, help='Filename to save results. If `None`, will use "results yyymmddhhMM.csv".')
     args = parser.parse_args()
     if args.filename is None:
@@ -411,7 +412,7 @@ def main():
     print(args)
     np.random.seed(42)
     with open(args.filename, 'w+') as result_output:
-        print('Graph Name,buckets,repeat,seeds,iteration,time,error', file=result_output)
+        print('Graph Name,buckets,repeat,seeds,lambda,iteration,time,error', file=result_output)
         if args.buckets is None:
             args.buckets = [DEFAULT_BUCKETS]
         for gi, graph_name in enumerate(args.graph):
@@ -454,26 +455,25 @@ def main():
                         for j, li in enumerate(labeled_indices):
                             for k in range(len(unique_labels)):
                                 seeds[li[:top], k] = [-1 / (len(unique_labels) - 1), 1][j == k]
-                        estimated_labels, t, x = submodular_semisupervised_clustering(hgraph_dict, seeds, node_weights,
-                                                                                   method=args.method, objective=args.objective,
-                                                                                   implementation=args.implementation,
-                                                                                   parallelized=False,
-                                                                                   error_tolerance=args.error_tolerance,
-                                                                                   return_x=True, iterations=args.iterations,
-                                                                                   verbose=args.verbose)
-                        errors.append(multiclassification_error_from_x(x, true_labels))
-                        for it, (time, err) in enumerate(zip(t, errors[-1])):
-                            print(f'{graph_name},{b},{r},{top},{it},{time},{err}', file=result_output)
-                        # _, ax = plt.subplots()
-                        # data_matrix = np.stack((x[-1], x[-2]), axis=1)
-                        # errors.append(plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring='cardinality', labels=labels))
-                        # plt.savefig(f'data/Paper_results/{dataset_name}_{20*(i+1):03d}', dpi=300)
-                        # plt.close()
-                    total_errors.append(errors)
-                total_errors = np.array(total_errors) * 100
+                        for l in args.lamda:
+                            estimated_labels, t, x = submodular_semisupervised_clustering(
+                                hgraph_dict, seeds, node_weights, method=args.method, objective=args.objective,
+                                implementation=args.implementation, parallelized=False,
+                                error_tolerance=args.error_tolerance, return_x=True, iterations=args.iterations,
+                                lamda=l, verbose=args.verbose)
+                            errors.append(multiclassification_error_from_x(x, true_labels))
+                            for it, (time, err) in enumerate(zip(t, errors[-1])):
+                                print(f'{graph_name},{b},{r},{top},{l},{it},{time},{err}', file=result_output)
+                            # _, ax = plt.subplots()
+                            # data_matrix = np.stack((x[-1], x[-2]), axis=1)
+                            # errors.append(plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring='cardinality', labels=labels))
+                            # plt.savefig(f'data/Paper_results/{dataset_name}_{20*(i+1):03d}', dpi=300)
+                            # plt.close()
+                        # total_errors.append(errors)
+                # total_errors = np.array(total_errors) * 100
                 # print(total_errors)
-                averages = total_errors.mean(axis=0)
-                stds = total_errors.std(axis=0)
+                # averages = total_errors.mean(axis=0)
+                # stds = total_errors.std(axis=0)
                 # print(f'{"Our method":15s} &', ' & '.join([f'{a:5.2f} ± {s:5.2f}' for a, s in zip(averages, stds)]), end=' \\\\\n' if gi < len(args.graph) - 1 else '\n')
 
 
