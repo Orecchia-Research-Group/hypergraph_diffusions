@@ -61,8 +61,8 @@ def make_clique_regularizer(n, m, D, hypergraph, weights):
 
 
 regularizers = {
-    'degree': make_degree_regularizer,
-    'clique': make_clique_regularizer,
+    "degree": make_degree_regularizer,
+    "clique": make_clique_regularizer,
 }
 
 
@@ -75,7 +75,7 @@ def make_regularizer(reg_string, n, m, D, hypergraph, weights):
 
 # FUCK numpy for not supporting weighted norms
 def weighted_median(values, sample_weight=None):
-    """ Very close to numpy.percentile, but supports weights.
+    """Very close to numpy.percentile, but supports weights.
     NOTE: quantiles should be in [0, 1]!
     :param values: numpy.array with data
     :param sample_weight: array-like of the same length as `array`
@@ -91,11 +91,18 @@ def weighted_median(values, sample_weight=None):
     values = np.array([values[s, i] for i, s in enumerate(sorter.T)])
     sample_weight = sample_weight[sorter]
 
-    weighted_quantiles = np.cumsum(sample_weight, axis=0) / np.sum(sample_weight, axis=0)
-    return [np.interp(quantiles, weighted_quantiles[:, i], values[i, :]) for i in range(weighted_quantiles.shape[1])]
+    weighted_quantiles = np.cumsum(sample_weight, axis=0) / np.sum(
+        sample_weight, axis=0
+    )
+    return [
+        np.interp(quantiles, weighted_quantiles[:, i], values[i, :])
+        for i in range(weighted_quantiles.shape[1])
+    ]
 
 
-def compute_hypergraph_matrices(n, m, hypergraph, weights, hypergraph_node_weights=None):
+def compute_hypergraph_matrices(
+    n, m, hypergraph, weights, hypergraph_node_weights=None
+):
     if weights is None:
         weights = defaultdict(lambda: 1)
     values = []
@@ -103,7 +110,11 @@ def compute_hypergraph_matrices(n, m, hypergraph, weights, hypergraph_node_weigh
     j = []
     w = []
     for row, e in enumerate(hypergraph):
-        values.extend([1] * len(e) if hypergraph_node_weights is None else hypergraph_node_weights[e])
+        values.extend(
+            [1] * len(e)
+            if hypergraph_node_weights is None
+            else hypergraph_node_weights[e]
+        )
         i.extend([row] * len(e))
         j.extend(e)
         w.append(weights[e])
@@ -127,7 +138,15 @@ def quadratic(x, sparse_h, rank, W, D, center_id=None):
         y = np.divide((sparse_h @ x).T, rank).T
     else:
         y = x[center_id]
-    fx = sum([W[i, i] * wv * np.linalg.norm(x[j] - y[i], axis=0)**2 for i, j, wv in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
+    fx = (
+        sum(
+            [
+                W[i, i] * wv * np.linalg.norm(x[j] - y[i], axis=0) ** 2
+                for i, j, wv in zip(sparse_h.row, sparse_h.col, sparse_h.data)
+            ]
+        )
+        / 2
+    )  # - np.einsum('ij,ij->', x, s)
     gradient = np.subtract((D * x.T).T, sparse_h.T @ W @ y)
     return gradient, y, fx
 
@@ -148,18 +167,30 @@ def linear(x, sparse_h, rank, W, D, center_id=None):
     k = 0
     for i, r in enumerate(rank):
         if center_id is None:
-            y[i, :] = weighted_median([x[he[j]] for j in range(k, k+row_counter[i])],
-                                      sample_weight=sparse_h.data[k:k+row_counter[i]])
+            y[i, :] = weighted_median(
+                [x[he[j]] for j in range(k, k + row_counter[i])],
+                sample_weight=sparse_h.data[k : k + row_counter[i]],
+            )
         else:
-            y[i, :] = x[center_id[tuple(he[k:k+row_counter[i]])]]
+            y[i, :] = x[center_id[tuple(he[k : k + row_counter[i]])]]
         k += row_counter[i]
     # print((x.T @ D).sum())
-    fx = sum([W[i, i] * wv * np.linalg.norm(x[j] - y[i], ord=1, axis=0)**2 for i, j, wv in zip(sparse_h.row, sparse_h.col, sparse_h.data)]) / 2 # - np.einsum('ij,ij->', x, s)
+    fx = (
+        sum(
+            [
+                W[i, i] * wv * np.linalg.norm(x[j] - y[i], ord=1, axis=0) ** 2
+                for i, j, wv in zip(sparse_h.row, sparse_h.col, sparse_h.data)
+            ]
+        )
+        / 2
+    )  # - np.einsum('ij,ij->', x, s)
     gradient = np.subtract((D * x.T).T, sparse_h.T @ W @ y)
     return gradient, y, fx
 
 
-def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_node_weights=None):
+def nonvectorized_infinity(
+    x, sparse_h, rank, W, D, center_id=None, hypergraph_node_weights=None
+):
     hypergraph = []
     he = sparse_h.col
     k = 0
@@ -186,18 +217,20 @@ def nonvectorized_infinity(x, sparse_h, rank, W, D, center_id=None, hypergraph_n
             y[i, :] = y_min + (y_max - y_min) / 2
         else:
             y[i, :] = x[center_id[tuple(e)]]
-        dist = np.einsum('v,vd->vd', we, (xe - y[i, :]))
+        dist = np.einsum("v,vd->vd", we, (xe - y[i, :]))
         argmax = dist == dist.max(axis=0)
         argmin = dist == dist.min(axis=0)
         # degree[e] += (argmax | argmin) * W[i, i]
         maxmult = argmax.astype(int)
         minmult = argmin.astype(int)
-        gradient[e] += W[i, i] * np.einsum('vd,v,vd->vd', dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult))
+        gradient[e] += W[i, i] * np.einsum(
+            "vd,v,vd->vd", dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult)
+        )
         # The following line performs slightly better, but the above line is cleaner
         # and used np.einsum, therefore it is OBVIOUSLY better
         # has not added hyperedge node weights below
         # gradient[e] += W[i, i] * ((xe - y[i, :]).T * de).T * (maxmult / (maxmult.T * de).sum(axis=1) + minmult / (minmult.T * de).sum(axis=1))
-        fx += np.linalg.norm(dist, ord=np.inf, axis=0)**2
+        fx += np.linalg.norm(dist, ord=np.inf, axis=0) ** 2
     # gradient = (gradient.T / D).T
     # degree[degree == 0] = 1
     # fx -= np.einsum('ij,ij->', x, s)
@@ -208,17 +241,34 @@ def added_terms(x, gradient, fx, D, s, f, beta):
     gradient -= f
     fx -= (x * f).sum(axis=0)
     if beta != 0:
-        gradient *= (1 - beta)
+        gradient *= 1 - beta
         gradient += beta * (D @ (x - s))
-        fx *= (1 - beta)
+        fx *= 1 - beta
         fx += beta * ((D @ (x - s)) * (x - s)).sum(axis=0) / 2
     return gradient, fx
 
 
-def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=1, center_id=None, hypergraph_node_weights=None,
-              func=nonvectorized_infinity, h=H, T=None, eps=EPS, regularizer=tuple(regularizers.keys())[0], verbose=0):
+def diffusion(
+    x0,
+    n,
+    m,
+    D,
+    hypergraph,
+    weights,
+    s=None,
+    lamda=1,
+    center_id=None,
+    hypergraph_node_weights=None,
+    func=nonvectorized_infinity,
+    h=H,
+    T=None,
+    eps=EPS,
+    # AD NOTE: Isn't this line just setting regularizer = 'degree'?
+    regularizer=tuple(regularizers.keys())[0],
+    verbose=0,
+):
     if lamda <= 0:
-        print('Warning: lamda <= 0. This will ignore the graph structure.')
+        print("Warning: lamda <= 0. This will ignore the graph structure.")
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
     # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
@@ -228,7 +278,7 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=1, center_id=None,
     precond_func, R = make_regularizer(regularizer, n, m, D, hypergraph, weights)
 
     if verbose > 0:
-        print(f'Average degree = {sum(D) / n:.3f}. Average rank = {sum(rank) / m:.3f}')
+        print(f"Average degree = {sum(D) / n:.3f}. Average rank = {sum(rank) / m:.3f}")
     if s is None:
         s = np.zeros_like(x0)
     x = [x0]
@@ -239,7 +289,11 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=1, center_id=None,
     t_start = datetime.now()
     iteration_times = [0]
     if verbose > 0:
-        print('{:>10s} {:>6s} {:>13s} {:>14s}'.format('Time (s)', '# Iter', '||dx||_D^2', 'F(x(t))'))
+        print(
+            "{:>10s} {:>6s} {:>13s} {:>14s}".format(
+                "Time (s)", "# Iter", "||dx||_D^2", "F(x(t))"
+            )
+        )
     while True:
         # \nabla f(x) = \sum_h w_h \bar{\delta}_h (x)
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
@@ -253,12 +307,19 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=1, center_id=None,
         fx.append(new_fx)
         iteration_times.append((datetime.now() - t_start).total_seconds())
         if verbose > 0:
-            print(f'\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}', end='')
+            print(
+                f"\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}",
+                end="",
+            )
+        # AD NOTE: The degree regularizer precond_func multiplies by D_inv, but multiplying gradient
+        # by a copy of D up in line 303 seems to counteract this?
         new_x = x[-1] - h * precond_func(gradient)
         if (len(x) > 2 and crit <= eps) or (T is not None and t >= T):
             if verbose > 0:
                 t_now = datetime.now()
-                print(f'\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}')
+                print(
+                    f"\r{(t_now - t_start).total_seconds():10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}"
+                )
             break
         x.append(new_x)
         crit = ((R @ (x[-1] - x[-2])) * (x[-1] - x[-2])).sum(axis=0).max() / 2
@@ -267,7 +328,9 @@ def diffusion(x0, n, m, D, hypergraph, weights, s=None, lamda=1, center_id=None,
     return np.array(iteration_times), np.array(x), np.array(y), np.array(fx)
 
 
-def sweep_cut(x, n, m, D, hypergraph, weights=None, center_id=None, hypergraph_node_weights=None):
+def sweep_cut(
+    x, n, m, D, hypergraph, weights=None, center_id=None, hypergraph_node_weights=None
+):
     """Find the best sweepcut"""
     if weights is None:
         weights = defaultdict(lambda: 1)
@@ -280,9 +343,9 @@ def sweep_cut(x, n, m, D, hypergraph, weights=None, center_id=None, hypergraph_n
     is_in_L = np.zeros(n, bool)
     fx = 0
     vol = 0
-    value = np.zeros(n-1)
-    volume = np.zeros(n-1)
-    conductance = np.zeros(n-1)
+    value = np.zeros(n - 1)
+    volume = np.zeros(n - 1)
+    conductance = np.zeros(n - 1)
     for i, v in enumerate(order[:-1]):
         vol += D[v]
         for h in hyperedges[v]:
@@ -300,20 +363,24 @@ def sweep_cut(x, n, m, D, hypergraph, weights=None, center_id=None, hypergraph_n
 
 
 def all_sweep_cuts(x, n, m, node_weights, hypergraph, verbose):
-    value = np.zeros((x.shape[1], x.shape[0]-1))
+    value = np.zeros((x.shape[1], x.shape[0] - 1))
     volume = np.zeros(value.shape)
     conductance = np.zeros(value.shape)
     for d, xtd in enumerate(x.T):
         if verbose > 0:
-            print(f'd = {d:3d}', end='\r')
-        value[d], volume[d], conductance[d] = sweep_cut(xtd, n, m, node_weights, hypergraph)
+            print(f"d = {d:3d}", end="\r")
+        value[d], volume[d], conductance[d] = sweep_cut(
+            xtd, n, m, node_weights, hypergraph
+        )
     if verbose > 0:
         print()
     return value, volume, conductance
 
 
-diffusion_functions = OrderedDict([
-    ('quadratic', quadratic),
-    ('linear', linear),
-    ('infinity', nonvectorized_infinity),
-])
+diffusion_functions = OrderedDict(
+    [
+        ("quadratic", quadratic),
+        ("linear", linear),
+        ("infinity", nonvectorized_infinity),
+    ]
+)
