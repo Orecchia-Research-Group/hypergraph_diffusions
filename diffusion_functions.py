@@ -301,14 +301,11 @@ def diffusion(
             )
         )
     while True:
-        # \nabla f(x) = \lambda D (x - s) + \sum_h w_h \bar{\delta}_h(x) \partial \bar{delta}_h(x)
+        # \nabla f(x) = \lambda D x - s + \sum_h w_h \bar{\delta}_h(x) \partial \bar{delta}_h(x)
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-        # cut_gradient = np.array(gradient)
         disagreement = x[-1] - s
-        # label_gradient = lamda * (D * disagreement.T).T
-        gradient += lamda * (D * disagreement.T).T
-        new_fx += lamda * ((D * disagreement.T).T * disagreement).sum(axis=0) / 2
-        # gradient -= gradient.sum(axis=0) / n
+        gradient += lamda * (D * x[-1].T).T - s
+        new_fx += lamda * ((D * x[-1].T).T * x[-1]).sum(axis=0) / 2 - (x[-1] * s).sum(axis=0)
         y.append(new_y)
         fx.append(new_fx)
         iteration_times.append((datetime.now() - t_start).total_seconds())
