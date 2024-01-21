@@ -9,7 +9,7 @@ from collections import OrderedDict, defaultdict, Counter
 from functools import partial
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import bicgstab
+from scipy.sparse.linalg import bicgstab, LinearOperator
 
 import pdb
 
@@ -34,10 +34,12 @@ def clique_regularizer(L, gradient):
 
 
 def make_degree_regularizer(n, m, D, hypergraph, weights):
+    print('Using degree regularizer')
     return partial(degree_regularizer, D), sparse.diags(D)
 
 
 def make_clique_regularizer(n, m, D, hypergraph, weights):
+    print('Using clique regularizer')
     clique_weights = defaultdict(float)
     for e in hypergraph:
         w = weights[e]
@@ -57,7 +59,11 @@ def make_clique_regularizer(n, m, D, hypergraph, weights):
         row.append(i)
         col.append(j)
     L = sparse.coo_matrix((data, (row, col)), shape=(n, n))
-    return partial(clique_regularizer, L), L
+
+    def mult(v):
+        return L @ v + 1000 * v.sum(axis=0)
+    operator = LinearOperator((n, n), matvec=mult)
+    return partial(clique_regularizer, operator), L
 
 
 regularizers = {
@@ -147,7 +153,7 @@ def quadratic(x, sparse_h, rank, W, D, center_id=None):
         )
         / 2
     )  # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract((D * x.T).T, sparse_h.T @ W @ y)
+    gradient = sparse_h.T @ W @ y       # - (D * x.T).T
     return gradient, y, fx
 
 
@@ -169,10 +175,10 @@ def linear(x, sparse_h, rank, W, D, center_id=None):
         if center_id is None:
             y[i, :] = weighted_median(
                 [x[he[j]] for j in range(k, k + row_counter[i])],
-                sample_weight=sparse_h.data[k : k + row_counter[i]],
+                sample_weight=sparse_h.data[k: k + row_counter[i]],
             )
         else:
-            y[i, :] = x[center_id[tuple(he[k : k + row_counter[i]])]]
+            y[i, :] = x[center_id[tuple(he[k: k + row_counter[i]])]]
         k += row_counter[i]
     # print((x.T @ D).sum())
     fx = (
@@ -184,7 +190,7 @@ def linear(x, sparse_h, rank, W, D, center_id=None):
         )
         / 2
     )  # - np.einsum('ij,ij->', x, s)
-    gradient = np.subtract((D * x.T).T, sparse_h.T @ W @ y)
+    gradient = sparse_h.T @ W @ y # - (D * x.T).T
     return gradient, y, fx
 
 
@@ -264,11 +270,11 @@ def diffusion(
     T=None,
     eps=EPS,
     # AD NOTE: Isn't this line just setting regularizer = 'degree'?
-    regularizer=tuple(regularizers.keys())[0],
+    regularizer='degree',
     verbose=0,
 ):
     if lamda <= 0:
-        print("Warning: lamda <= 0. This will ignore the graph structure.")
+        print("Warning: lamda <= 0. This will ignore the provided labels.")
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights)
     # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
     # x[0] -= (D * x[0].T).T.sum(axis=0) / sum(D)
@@ -295,13 +301,13 @@ def diffusion(
             )
         )
     while True:
-        # \nabla f(x) = \sum_h w_h \bar{\delta}_h (x)
+        # \nabla f(x) = \lambda D (x - s) + \sum_h w_h \bar{\delta}_h(x) \partial \bar{delta}_h(x)
         gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
-        new_fx *= lamda
-        gradient *= lamda
+        # cut_gradient = np.array(gradient)
         disagreement = x[-1] - s
-        gradient += (D * disagreement.T).T
-        new_fx += ((D * disagreement.T).T * disagreement).sum(axis=0) / 2
+        # label_gradient = lamda * (D * disagreement.T).T
+        gradient += lamda * (D * disagreement.T).T
+        new_fx += lamda * ((D * disagreement.T).T * disagreement).sum(axis=0) / 2
         # gradient -= gradient.sum(axis=0) / n
         y.append(new_y)
         fx.append(new_fx)
@@ -313,7 +319,10 @@ def diffusion(
             )
         # AD NOTE: The degree regularizer precond_func multiplies by D_inv, but multiplying gradient
         # by a copy of D up in line 303 seems to counteract this?
+        # dx = -h * precond_func(gradient)
         new_x = x[-1] - h * precond_func(gradient)
+        # print(np.array([x[-1].reshape(-1), cut_gradient.reshape(-1), label_gradient.reshape(-1), gradient.reshape(-1), dx.reshape(-1)]))
+        # input()
         if (len(x) > 2 and crit <= eps) or (T is not None and t >= T):
             if verbose > 0:
                 t_now = datetime.now()

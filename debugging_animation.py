@@ -39,6 +39,7 @@ def animate_hgraph_diffusion(
         s=s_vector,
         h=step_size,
         T=T,
+        lamda=0,
         verbose=verbose,
     )
     successful_iterations = x.shape[0]

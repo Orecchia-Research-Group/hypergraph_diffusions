@@ -377,10 +377,10 @@ def graph_diffusion(x0, D, A, s=None, h=0.5, T=100, verbose=True):
         # the current constants in our writeup suggest our hypergraph diffusion is equivalent to
         # performing this graph diffusion with an extra factor of 1/4th on the operator L(x).
         # pdb.set_trace()
-        x_k = x_k - h * (D_inv_L @ x_k - D_inv @ s)
+        x_k = x_k - h * (D_inv_L @ x_k - s + x_k)
         x = np.append(x, np.reshape(x_k, newshape=(1, n)), axis=0)
         y = np.append(y, np.reshape(grad, newshape=(1, n)), axis=0)
-        fx.append(graph_quadratic(L, x_k - s))
+        fx.append(graph_quadratic(L, x_k) + np.einsum('i,ij,ij->j', D, x_k - s, x_k - s))
         if verbose:
             t_now = datetime.now()
             print(
