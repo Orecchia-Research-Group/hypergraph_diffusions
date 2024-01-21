@@ -266,6 +266,62 @@ def build_knn_graph(data_matrix, k):
     return nx.adjacency_matrix(G, nodelist=list(range(n)))
 
 
+# data_matrix has shape (num_nodes x embedding_dimension)
+def create_node_weights(method, data_matrix, hgraph_dict):
+    # weights_dict is keyed by tuples (i,h) for the weight of node i wrt hyperedge h
+    weights_dict = dict()
+
+    # 'gaussian_to_central_neighbor': e^{-||x_i - x_h||} for x_h corresponding to the node whose k-nearest-neighbors for hyperedge h
+    if method == "gaussian_to_central_neighbor":
+        # assuming that the first index of each hyperedge corresponds to the "central neighbor" of that hyperedge
+        assert check_central_neighbor_indices(hgraph_dict["hypergraph"])
+        for h_idx, edge in enumerate(hgraph_dict["hypergraph"]):
+            central_neighbor = data_matrix[edge[0], :]
+            # include "self-weights" on true central neighbor node
+            for v in edge:
+                x_v = data_matrix[v, :]
+                # Optional: normalize according to the dimension of the feature space
+                weights_dict[(v, h_idx)] = gaussian_kernel(
+                    np.subtract(central_neighbor, x_v), normalize=False
+                )
+    # centroid is defined as mean of all embedding points in the hyperedge
+    elif method == "gaussian_to_centroid":
+        for h_idx, edge in enumerate(hgraph_dict["hypergraph"]):
+            # get entries of data_matrix corresponding to edge
+            edge_embedding = data_matrix[edge, :]
+            centroid = np.mean(edge_embedding, axis=0)
+            for v in edge:
+                x_v = data_matrix[v, :]
+                # Optional: normalize according to the dimension of the feature space
+                weights_dict[(v, h_idx)] = gaussian_kernel(
+                    np.subtract(centroid, x_v), normalize=False
+                )
+    else:
+        raise ValueError(
+            f"Unsupported node weight construction method specified: {method}."
+        )
+
+    return weights_dict
+
+
+# Option to normalize by dimension of x: 1/sqrt(sigma^2*(2*pi)^d)*exp(-||x||^2_2/ 2*sigma^2)
+def gaussian_kernel(x_vec, sigma=1, normalize=False):
+    if normalize:
+        dim = x_vec.size
+        normalization = np.divide(1, sigma * np.sqrt((2 * np.pi) ** dim))
+    else:
+        normalization = 1
+    return normalization * np.exp(-np.linalg.norm(x_vec, ord=2) ** 2 / (2 * sigma**2))
+
+
+# iterates through all hyperedges, confirming whether the first entry of the ith hyperedge is node i
+def check_central_neighbor_indices(hypergraph):
+    central_neighbor_corresponds_to_index = True
+    for idx, edge in enumerate(hypergraph):
+        central_neighbor_corresponds_to_index = edge[0] == idx
+    return central_neighbor_corresponds_to_index
+
+
 """
 GRAPH DIFFUSION
 
@@ -511,7 +567,7 @@ def compare_estimated_labels(
     num_iterations,
     diffusion_step_size=None,
     titlestring=None,
-    hypergraph_node_weights=None,
+    node_weight_method=None,
 ):
     # generate new data
     _, data_matrix = generate_data(verbose=False)
@@ -520,6 +576,12 @@ def compare_estimated_labels(
     # build graph/hypergraph
     knn_adj_matrix = build_knn_graph(data_matrix, k)
     knn_hgraph_dict = build_knn_hypergraph(data_matrix, k)
+    if node_weight_method is not None:
+        hypergraph_node_weights = create_node_weights(
+            method=node_weight_method,
+            data_matrix=data_matrix,
+            hgraph_dict=knn_hgraph_dict,
+        )
 
     # run diffusion
     if method == "diffusion":
@@ -528,7 +590,7 @@ def compare_estimated_labels(
             knn_hgraph_dict,
             num_iterations=num_iterations,
             verbose=False,
-            hypergraph_node_weights=None,
+            hypergraph_node_weights=hypergraph_node_weights,
         )
         hypergraph_x = hypergraph_diff_results["x"]
         graph_x = graph_diff_results["x"]
