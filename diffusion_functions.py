@@ -14,7 +14,7 @@ from scipy.sparse.linalg import bicgstab, LinearOperator
 import pdb
 
 
-EPS = 1e-6
+EPS = 1e-8
 H = 0.1
 
 
@@ -34,12 +34,10 @@ def clique_regularizer(L, gradient):
 
 
 def make_degree_regularizer(n, m, D, hypergraph, weights):
-    print('Using degree regularizer')
     return partial(degree_regularizer, D), sparse.diags(D)
 
 
 def make_clique_regularizer(n, m, D, hypergraph, weights):
-    print('Using clique regularizer')
     clique_weights = defaultdict(float)
     for e in hypergraph:
         w = weights[e]

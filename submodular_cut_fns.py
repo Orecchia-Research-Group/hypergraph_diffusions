@@ -285,8 +285,8 @@ EXPERIMENTS
 
 def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data_matrix=None, method='PPR',
                                          iterations=50, objective='cardinality', implementation='specialized',
-                                         parallelized=False, error_tolerance=0.1, bandwidth=0.1, return_x=False,
-                                         lamda=1, verbose=0):
+                                         parallelized=False, error_tolerance=1, bandwidth=0.1, return_x=False,
+                                         return_fx=False, lamda=1, verbose=0):
     """Given a hypergraph and a vector of seeded labels, perform semi-supervised clustering.
     If method==PPR, compute the personalized page-rank vector, initialized at 0 and using the appropriate s-vector from seeded_labels
     If method==diffusion, initialize at seeded_labels and diffuse values
@@ -335,13 +335,15 @@ def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data
             MI_h = lambda S, h: mutual_information(S, h, K, logdet_dict)
             cut_func = lambda *args, **kwargs: submodular_subgradient(MI_h, parallelize=False, *args, **kwargs)
 
-    t, x, _, _ = diffusion(x0, n, m, D, hypergraph, weights=None, func=cut_func,
+    t, x, _, fx = diffusion(x0, n, m, D, hypergraph, weights=None, func=cut_func,
                            h=step_size, s=s_vector, T=iterations, lamda=lamda, verbose=verbose)
     if method == 'diffusion':
         estimated_labels = x[-1]
     elif method == 'PPR':
         estimated_labels = (1-error_tolerance/2)*np.sum(x, axis=0)
     if return_x:
+        if return_fx:
+            return estimated_labels, t, x, fx
         return estimated_labels, t, x
     return estimated_labels
 
@@ -412,7 +414,7 @@ def main():
     print(args)
     np.random.seed(42)
     with open(args.filename, 'w+') as result_output:
-        print('Graph Name,buckets,repeat,seeds,lambda,iteration,time,error', file=result_output)
+        print('Graph Name,buckets,repeat,seeds,lambda,iteration,time,error,gap', file=result_output)
         if args.buckets is None:
             args.buckets = [DEFAULT_BUCKETS]
         for gi, graph_name in enumerate(args.graph):
@@ -445,25 +447,48 @@ def main():
 
                 for r in range(args.repeats):
                     errors = []
-                    for li in labeled_indices:
-                        np.random.shuffle(li)
+                    perm = np.arange(n)
+                    np.random.shuffle(perm)
+                    # for li in labeled_indices:
+                    #     np.random.shuffle(li)
                     seeds = np.zeros((n, len(unique_labels)))
 
                     for top in range(args.minimum_samples[gi], args.maximum_samples[gi] + 1, args.step[gi]):
                         if args.verbose > 0:
                             print(r+1, top)
-                        for j, li in enumerate(labeled_indices):
-                            for k in range(len(unique_labels)):
-                                seeds[li[:top], k] = [-1 / (len(unique_labels) - 1), 1][j == k]
+                        # for j, li in enumerate(labeled_indices):
+                        for k in range(len(unique_labels)):
+                            seeds[perm[:top], k] = 2 * (true_labels[perm[:top]] == k) - 1
                         for l in args.lamda:
-                            estimated_labels, t, x = submodular_semisupervised_clustering(
-                                hgraph_dict, seeds, node_weights, method=args.method, objective=args.objective,
+                            estimated_labels, t, x, _ = submodular_semisupervised_clustering(
+                                hgraph_dict, seeds * l, node_weights, method=args.method, objective=args.objective,
                                 implementation=args.implementation, parallelized=False,
-                                error_tolerance=args.error_tolerance, return_x=True, iterations=args.iterations,
-                                lamda=l, verbose=args.verbose)
+                                error_tolerance=args.error_tolerance, return_x=True, return_fx=True,
+                                iterations=args.iterations, lamda=l, verbose=args.verbose)
+                            x_cs = np.cumsum(x, axis=0)
+                            fx = np.zeros(len(x_cs))
+                            for tt in range(len(x_cs)):
+                                x_cs[tt] /= tt + 1
+                                fx[tt] = l * ((x_cs[tt].T - seeds.T / node_weights) ** 2 * node_weights).sum()
+                                for e in hypergraph:
+                                    if len(e) == 0:
+                                        continue
+                                    y_min = x_cs[tt][e, :].min(axis=0)
+                                    y_max = x_cs[tt][e, :].max(axis=0)
+                                    fx[tt] += ((y_max - y_min) ** 2).sum()
+                            fx /= x_cs.shape[2]
+
+                            # Transforming fx from
+                            # \sum_h w_h d(x)^2 / 2 + λ ||x||_D^2 / 2 - <x, λ s>
+                            # to
+                            # \sum_h w_h d(x)^2 + λ ||x - D^{-1} s||_D^2
+                            # by mutliplying with 2 and adding λ ||s||_D^2
+                            # Our computation is separate for each label
+                            # fx *= 2
+                            # fx += l * ((seeds * seeds).T / node_weights).sum()
                             errors.append(multiclassification_error_from_x(x, true_labels))
                             for it, (time, err) in enumerate(zip(t, errors[-1])):
-                                print(f'{graph_name},{b},{r},{top},{l},{it},{time},{err}', file=result_output)
+                                print(f'{graph_name},{b},{r},{top},{l},{it},{time},{err},{fx[it].sum()}', file=result_output)
                             # _, ax = plt.subplots()
                             # data_matrix = np.stack((x[-1], x[-2]), axis=1)
                             # errors.append(plot_label_comparison_binary(ax, estimated_labels, data_matrix, titlestring='cardinality', labels=labels))
