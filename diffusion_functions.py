@@ -34,10 +34,12 @@ def clique_regularizer(L, gradient):
 
 
 def make_degree_regularizer(n, m, D, hypergraph, weights):
+    print("Using degree regularizer")
     return partial(degree_regularizer, D), sparse.diags(D)
 
 
 def make_clique_regularizer(n, m, D, hypergraph, weights):
+    print("Using clique regularizer")
     clique_weights = defaultdict(float)
     for e in hypergraph:
         w = weights[e]
@@ -60,6 +62,7 @@ def make_clique_regularizer(n, m, D, hypergraph, weights):
 
     def mult(v):
         return L @ v + 1000 * v.sum(axis=0)
+
     operator = LinearOperator((n, n), matvec=mult)
     return partial(clique_regularizer, operator), L
 
@@ -151,7 +154,7 @@ def quadratic(x, sparse_h, rank, W, D, center_id=None):
         )
         / 2
     )  # - np.einsum('ij,ij->', x, s)
-    gradient = sparse_h.T @ W @ y       # - (D * x.T).T
+    gradient = sparse_h.T @ W @ y  # - (D * x.T).T
     return gradient, y, fx
 
 
@@ -173,10 +176,10 @@ def linear(x, sparse_h, rank, W, D, center_id=None):
         if center_id is None:
             y[i, :] = weighted_median(
                 [x[he[j]] for j in range(k, k + row_counter[i])],
-                sample_weight=sparse_h.data[k: k + row_counter[i]],
+                sample_weight=sparse_h.data[k : k + row_counter[i]],
             )
         else:
-            y[i, :] = x[center_id[tuple(he[k: k + row_counter[i]])]]
+            y[i, :] = x[center_id[tuple(he[k : k + row_counter[i]])]]
         k += row_counter[i]
     # print((x.T @ D).sum())
     fx = (
@@ -188,7 +191,7 @@ def linear(x, sparse_h, rank, W, D, center_id=None):
         )
         / 2
     )  # - np.einsum('ij,ij->', x, s)
-    gradient = sparse_h.T @ W @ y # - (D * x.T).T
+    gradient = sparse_h.T @ W @ y  # - (D * x.T).T
     return gradient, y, fx
 
 
@@ -202,7 +205,6 @@ def nonvectorized_infinity(
         hypergraph.append([he[j] for j in range(k, k + int(r))])
         k += int(r)
     gradient = np.zeros(x.shape)
-    # degree = np.zeros(x.shape)
     degree = np.array(D)
     if hypergraph_node_weights is None:
         hypergraph_node_weights = {tuple(e): [1] * len(e) for e in hypergraph}
@@ -214,21 +216,38 @@ def nonvectorized_infinity(
         xe = x[e]
         we = np.array(hypergraph_node_weights[tuple(e)])
         de = degree[e]
-        # TODO: Find correct y; Currently not taking w_e into account
-        y_max = xe.max(axis=0)
-        y_min = xe.min(axis=0)
+        # Find correct y, using weighted values of x.
+        # Weight x using elementwise multipication
+        weighted_xe = np.multiply(np.reshape(we, newshape=xe.shape), xe)
+        y_max = weighted_xe.max(axis=0)
+        y_min = weighted_xe.min(axis=0)
         if center_id is None:
             y[i, :] = y_min + (y_max - y_min) / 2
         else:
             y[i, :] = x[center_id[tuple(e)]]
-        dist = np.einsum("v,vd->vd", we, (xe - y[i, :]))
+        # NOTE: why multiply by an extra copy of we below? I've edited to line 230.
+        # dist = np.einsum("v,vd->vd", we, (xe - y[i, :]))
+        dist = weighted_xe - y[i, :]
         argmax = dist == dist.max(axis=0)
         argmin = dist == dist.min(axis=0)
         # degree[e] += (argmax | argmin) * W[i, i]
         maxmult = argmax.astype(int)
         minmult = argmin.astype(int)
-        gradient[e] += W[i, i] * np.einsum(
-            "vd,v,vd->vd", dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult)
+        # normalizes gradient entries by degree of node
+        # NOTE: THIS  is where we're currently "dropping" a factor of 1/2, compared to the theoretical
+        # diffusion we wrote down. Hence, we recover the same evolution as the graph, without needing
+        # to renormalize.
+        # NOTE: is the use of degree here to compute a convex combination over argmins and argmaxes?
+        # Gradient with node weights has an additional W^T_h out front
+        gradient[e] += (
+            W[i, i]
+            * np.diag(we)
+            @ np.einsum(
+                "vd,v,vd->vd",
+                dist,
+                de,
+                maxmult / (de @ maxmult) + minmult / (de @ minmult),
+            )
         )
         # The following line performs slightly better, but the above line is cleaner
         # and used np.einsum, therefore it is OBVIOUSLY better
@@ -267,8 +286,7 @@ def diffusion(
     h=H,
     T=None,
     eps=EPS,
-    # AD NOTE: Isn't this line just setting regularizer = 'degree'?
-    regularizer='degree',
+    regularizer="degree",
     verbose=0,
 ):
     if lamda <= 0:
@@ -300,10 +318,20 @@ def diffusion(
         )
     while True:
         # \nabla f(x) = \lambda D x - s + \sum_h w_h \bar{\delta}_h(x) \partial \bar{delta}_h(x)
-        gradient, new_y, new_fx = func(x[-1], sparse_h, rank, W, D, center_id=center_id)
+        gradient, new_y, new_fx = func(
+            x[-1],
+            sparse_h,
+            rank,
+            W,
+            D,
+            center_id=center_id,
+            hypergraph_node_weights=hypergraph_node_weights,
+        )
         disagreement = x[-1] - s
         gradient += lamda * (D * x[-1].T).T - s
-        new_fx += lamda * ((D * x[-1].T).T * x[-1]).sum(axis=0) / 2 - (x[-1] * s).sum(axis=0)
+        new_fx += lamda * ((D * x[-1].T).T * x[-1]).sum(axis=0) / 2 - (x[-1] * s).sum(
+            axis=0
+        )
         y.append(new_y)
         fx.append(new_fx)
         iteration_times.append((datetime.now() - t_start).total_seconds())
@@ -312,8 +340,11 @@ def diffusion(
                 f"\r{iteration_times[-1]:10.3f} {t:6d} {crit:13.6f} {float(fx[-1].min()):14.6f}",
                 end="",
             )
-        # AD NOTE: The degree regularizer precond_func multiplies by D_inv, but multiplying gradient
+        # NOTE: The degree regularizer precond_func multiplies by D_inv, but multiplying gradient
         # by a copy of D up in line 303 seems to counteract this?
+        # NOTE: it seems that ADDITIONAL degree regularization is taking place in line 233? Or is that computing
+        # a convex combination of the argmins/maxes? If additional regularization is taking place, is that why
+        # the diffusion is still operating correctly despite the above "self-negating" degree regularization?
         # dx = -h * precond_func(gradient)
         new_x = x[-1] - h * precond_func(gradient)
         # print(np.array([x[-1].reshape(-1), cut_gradient.reshape(-1), label_gradient.reshape(-1), gradient.reshape(-1), dx.reshape(-1)]))

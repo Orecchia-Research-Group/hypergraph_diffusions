@@ -11,12 +11,23 @@ from semi_supervised_manifold_learning import (
     diffusion_functions,
     diffusion,
     graph_diffusion,
+    create_node_weights,
 )
-from submodular_cut_fns import submodular_subgradient, cardinality_cut_fn
+from submodular_cut_fns import (
+    submodular_subgradient,
+    cardinality_cut_fn,
+)
 
 
 def animate_hgraph_diffusion(
-    data_matrix, hypergraph_dict, x0, T=49, step_size=1, verbose=False
+    data_matrix,
+    hypergraph_dict,
+    x0,
+    T=49,
+    step_size=1,
+    node_weight_method=None,
+    verbose=False,
+    hypergraph_name=" ",
 ):
     # let's extract some parameters
     n = hypergraph_dict["n"]
@@ -26,6 +37,14 @@ def animate_hgraph_diffusion(
     D = np.array([degree_dict[v] for v in range(n)])
     s_vector = np.zeros_like(x0)
 
+    if node_weight_method is not None:
+        hypergraph_node_weights = create_node_weights(
+            method=node_weight_method,
+            data_matrix=data_matrix,
+            hgraph_dict=hypergraph_dict,
+        )
+    else:
+        hypergraph_node_weights = None
     # for our hypergraph, first specify the edge objective function
     cut_func = diffusion_functions["infinity"]
     t, x, y, fx = diffusion(
@@ -41,12 +60,13 @@ def animate_hgraph_diffusion(
         T=T,
         lamda=0,
         verbose=verbose,
+        hypergraph_node_weights=hypergraph_node_weights,
     )
     successful_iterations = x.shape[0]
 
     # animate results
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_title(f"Hypergraph diffusion iteration {0} \n 2 hypergraph")
+    ax.set_title(f"Hypergraph diffusion iteration {0} \n {hypergraph_name}")
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
     # pdb.set_trace()
@@ -55,7 +75,7 @@ def animate_hgraph_diffusion(
     def update(frame):
         color = flat_x[frame, :]
         im = ax.scatter(data_matrix[:, 0], data_matrix[:, 1], c=color)
-        ax.set_title(f"Hypergraph diffusion iteration {frame} \n 2 hypergraph")
+        ax.set_title(f"Hypergraph diffusion iteration {frame} \n  {hypergraph_name}")
         cax.cla()
         fig.colorbar(im, cax=cax)
         return im

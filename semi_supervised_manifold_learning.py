@@ -24,7 +24,7 @@ import pdb
 DATA GENERATION
 
 Methods for building different "datasets" to cluster on. All methods return two
-(2n_pts x 2) numpy arrays: the first is "clean" data, the second has noise added.
+(2n_pts x dimension) numpy arrays: the first is "clean" data, the second has noise added.
 
 All methods construct both arrays such that that the first n/2 columns belong to
 community 1 and the latter n/2 columns all belong to community 2.
@@ -107,6 +107,83 @@ def generate_overlapping_rings(
     noisy_data = np.hstack([noisy_ring_1, noisy_ring_2]).T
 
     return clean_data, noisy_data
+
+
+# 2D implementation only
+def generate_concentric_rectangles(
+    inner_sidelengths=(1, 6),
+    outer_sidelengths=(2, 7),
+    n_pts=300,
+    noise_level=0.1,
+    verbose=True,
+):
+    inner_ball = np.vstack(
+        (
+            np.random.uniform(
+                low=-0.5 * inner_sidelengths[0],
+                high=0.5 * inner_sidelengths[0],
+                size=(n_pts),
+            ),
+            np.random.uniform(
+                low=-0.5 * inner_sidelengths[1],
+                high=0.5 * inner_sidelengths[1],
+                size=(n_pts),
+            ),
+        )
+    ).T
+    outer_ball = uniform_rectangle_sampler(
+        n_pts, x_sidelength=outer_sidelengths[0], y_sidelength=outer_sidelengths[1]
+    )
+
+    clean_data = np.vstack((inner_ball, outer_ball))
+    noisy_data = clean_data + np.random.normal(scale=noise_level, size=(2 * n_pts, 2))
+
+    if verbose:
+        plt.scatter(noisy_data[:, 0], noisy_data[:, 1])
+        plt.show()
+
+    return clean_data, noisy_data
+
+
+# randomly samples from surface of a 2D rectangule (i.e. perimeter of a rectangle) centered at (0,0)
+def uniform_rectangle_sampler(num_samples, x_sidelength=2, y_sidelength=4):
+    center = (0, 0)
+    # sample a random fraction to be estreme x values {(1,.),(-1,.)} versus extreme y values {(.,1),(.,-1)}
+    # sample fraction based on ratio of sides
+    extreme_x_frac = np.random.normal(
+        loc=y_sidelength / (x_sidelength + y_sidelength), scale=0.05
+    )
+    num_extreme_x_pts = int(extreme_x_frac * num_samples)
+    num_extreme_y_pts = num_samples - num_extreme_x_pts
+
+    ## Extreme x points
+    # first coordinate uniformly sampled from {-x_side/2,x_side/2}
+    x_first_coord = np.random.choice(
+        [-x_sidelength / 2, x_sidelength / 2],
+        replace=True,
+        size=num_extreme_x_pts,
+    )
+    # second coordinate sampled uniformly from center-0.5*y_side to center+0.5*y_side
+    x_second_cord = np.random.uniform(
+        low=-0.5 * y_sidelength, high=0.5 * y_sidelength, size=num_extreme_x_pts
+    )
+    extreme_x_coords = np.vstack((x_first_coord, x_second_cord)).T
+
+    ## Extreme y points
+    # first coordinate sampled uniformly from center-0.5*x_side to center+0.5*x_side
+    y_first_cord = np.random.uniform(
+        low=-0.5 * x_sidelength, high=0.5 * x_sidelength, size=num_extreme_y_pts
+    )
+    # second coordinate uniformly sampled from {-y_side/2,y_side/2}
+    y_second_coord = np.random.choice(
+        [-y_sidelength / 2, y_sidelength / 2],
+        replace=True,
+        size=num_extreme_y_pts,
+    )
+    extreme_y_coords = np.vstack((y_first_cord, y_second_coord)).T
+
+    data = np.vstack((extreme_x_coords, extreme_y_coords))
+    return data
 
 
 def generate_concentric_highdim(
@@ -267,51 +344,62 @@ def build_knn_graph(data_matrix, k):
 
 
 # data_matrix has shape (num_nodes x embedding_dimension)
-def create_node_weights(method, data_matrix, hgraph_dict):
-    # weights_dict is keyed by tuples (i,h) for the weight of node i wrt hyperedge h
-    weights_dict = dict()
+def create_node_weights(method, data_matrix, hgraph_dict, ord=1):
+    # hypergraph_node_weights is keyed by the tuple specifying the hyperedge.
+    # For each hyperedge, it's entry is an array of weights for each node in that hyperedge.
+    hypergraph_node_weights = dict()
 
     # 'gaussian_to_central_neighbor': e^{-||x_i - x_h||} for x_h corresponding to the node whose k-nearest-neighbors for hyperedge h
     if method == "gaussian_to_central_neighbor":
         # assuming that the first index of each hyperedge corresponds to the "central neighbor" of that hyperedge
-        assert check_central_neighbor_indices(hgraph_dict["hypergraph"])
+        try:
+            assert check_central_neighbor_indices(hgraph_dict["hypergraph"])
+        except:
+            pdb.set_trace()
         for h_idx, edge in enumerate(hgraph_dict["hypergraph"]):
+            hyperedge_weight_list = []
             central_neighbor = data_matrix[edge[0], :]
             # include "self-weights" on true central neighbor node
             for v in edge:
                 x_v = data_matrix[v, :]
                 # Optional: normalize according to the dimension of the feature space
-                weights_dict[(v, h_idx)] = gaussian_kernel(
-                    np.subtract(central_neighbor, x_v), normalize=False
+                hyperedge_weight_list.append(
+                    gaussian_kernel(
+                        np.subtract(central_neighbor, x_v), normalize=False, ord=ord
+                    )
                 )
+            hypergraph_node_weights[edge] = np.array(hyperedge_weight_list)
     # centroid is defined as mean of all embedding points in the hyperedge
     elif method == "gaussian_to_centroid":
         for h_idx, edge in enumerate(hgraph_dict["hypergraph"]):
+            hyperedge_weight_list = []
             # get entries of data_matrix corresponding to edge
             edge_embedding = data_matrix[edge, :]
             centroid = np.mean(edge_embedding, axis=0)
             for v in edge:
                 x_v = data_matrix[v, :]
                 # Optional: normalize according to the dimension of the feature space
-                weights_dict[(v, h_idx)] = gaussian_kernel(
-                    np.subtract(centroid, x_v), normalize=False
+                hyperedge_weight_list.append(
+                    gaussian_kernel(np.subtract(centroid, x_v), normalize=False)
                 )
+            hypergraph_node_weights[edge] = np.array(hyperedge_weight_list)
     else:
         raise ValueError(
             f"Unsupported node weight construction method specified: {method}."
         )
-
-    return weights_dict
+    return hypergraph_node_weights
 
 
 # Option to normalize by dimension of x: 1/sqrt(sigma^2*(2*pi)^d)*exp(-||x||^2_2/ 2*sigma^2)
-def gaussian_kernel(x_vec, sigma=1, normalize=False):
+def gaussian_kernel(x_vec, sigma=1, normalize=False, ord=2):
     if normalize:
         dim = x_vec.size
         normalization = np.divide(1, sigma * np.sqrt((2 * np.pi) ** dim))
     else:
         normalization = 1
-    return normalization * np.exp(-np.linalg.norm(x_vec, ord=2) ** 2 / (2 * sigma**2))
+    return normalization * np.exp(
+        -np.linalg.norm(x_vec, ord=ord) ** 2 / (2 * sigma**2)
+    )
 
 
 # iterates through all hyperedges, confirming whether the first entry of the ith hyperedge is node i
@@ -443,11 +531,12 @@ def diffusion_knn_clustering(
         hypergraph,
         weights=None,
         func=hypergraph_objective,
+        lamda=0,
         s=s_vector,
         h=step_size,
         T=num_iterations,
         verbose=verbose,
-        hypergraph_node_weights=None,
+        hypergraph_node_weights=hypergraph_node_weights,
     )
 
     W, sparse_h, rank = compute_hypergraph_matrices(n, m, hypergraph, weights=None)
@@ -526,6 +615,8 @@ def PPR_knn_clustering(
         s=s_vector,
         h=step_size,
         T=num_iterations,
+        lamda=effective_lambda,
+        hypergraph_node_weights=hypergraph_node_weights,
         verbose=verbose,
     )
     x_out = (1 - error_tolerance / 2) * np.sum(x, axis=0).flatten()
@@ -582,6 +673,8 @@ def compare_estimated_labels(
             data_matrix=data_matrix,
             hgraph_dict=knn_hgraph_dict,
         )
+    else:
+        hypergraph_node_weights = None
 
     # run diffusion
     if method == "diffusion":
@@ -589,7 +682,7 @@ def compare_estimated_labels(
             knn_adj_matrix,
             knn_hgraph_dict,
             num_iterations=num_iterations,
-            verbose=False,
+            verbose=True,
             hypergraph_node_weights=hypergraph_node_weights,
         )
         hypergraph_x = hypergraph_diff_results["x"]
@@ -604,7 +697,7 @@ def compare_estimated_labels(
             teleportation_factor=0.5,
             num_iterations=num_iterations,
             verbose=False,
-            hypergraph_node_weights=None,
+            hypergraph_node_weights=hypergraph_node_weights,
         )
         return graph_PPR_results["x_out"], hypergraph_PPR_results["x_out"], data_matrix
     else:
