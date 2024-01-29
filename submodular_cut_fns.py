@@ -486,7 +486,7 @@ def main():
                             # Our computation is separate for each label
                             # fx *= 2
                             # fx += l * ((seeds * seeds).T / node_weights).sum()
-                            errors.append(multiclassification_error_from_x(x, true_labels))
+                            errors.append(multiclassification_error_from_x(x[:, perm[top:], :], true_labels[perm[top:]]))
                             for it, (time, err) in enumerate(zip(t, errors[-1])):
                                 print(f'{graph_name},{b},{r},{top},{l},{it},{time},{err},{fx[it].sum()}', file=result_output)
                             # _, ax = plt.subplots()

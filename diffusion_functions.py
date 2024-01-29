@@ -34,12 +34,10 @@ def clique_regularizer(L, gradient):
 
 
 def make_degree_regularizer(n, m, D, hypergraph, weights):
-    print("Using degree regularizer")
     return partial(degree_regularizer, D), sparse.diags(D)
 
 
 def make_clique_regularizer(n, m, D, hypergraph, weights):
-    print("Using clique regularizer")
     clique_weights = defaultdict(float)
     for e in hypergraph:
         w = weights[e]
@@ -218,16 +216,20 @@ def nonvectorized_infinity(
         de = degree[e]
         # Find correct y, using weighted values of x.
         # Weight x using elementwise multipication
-        weighted_xe = np.multiply(np.reshape(we, newshape=xe.shape), xe)
-        y_max = weighted_xe.max(axis=0)
-        y_min = weighted_xe.min(axis=0)
+        # For any weighted metric, finding the maximum distance from a point
+        # yields one endpoint. Finding the maximum weighted distance from that
+        # gives the other endpoint.
+        first_max = (we * xe.T).argmax(axis=1)
+        first_xmax = xe[first_max, np.arange(first_max.shape[0])]
+        first_min = (we * (xe - first_xmax).T).argmin(axis=1)
+        first_xmin = xe[first_min, np.arange(first_max.shape[0])]
         if center_id is None:
-            y[i, :] = y_min + (y_max - y_min) / 2
+            y[i, :] = first_xmin + we[first_max] * (first_xmax - first_xmin) / (we[first_min] + we[first_max])
         else:
             y[i, :] = x[center_id[tuple(e)]]
         # NOTE: why multiply by an extra copy of we below? I've edited to line 230.
         # dist = np.einsum("v,vd->vd", we, (xe - y[i, :]))
-        dist = weighted_xe - y[i, :]
+        dist = (we * (xe - y[i, :]).T).T
         argmax = dist == dist.max(axis=0)
         argmin = dist == dist.min(axis=0)
         # degree[e] += (argmax | argmin) * W[i, i]
@@ -239,16 +241,8 @@ def nonvectorized_infinity(
         # to renormalize.
         # NOTE: is the use of degree here to compute a convex combination over argmins and argmaxes?
         # Gradient with node weights has an additional W^T_h out front
-        gradient[e] += (
-            W[i, i]
-            * np.diag(we)
-            @ np.einsum(
-                "vd,v,vd->vd",
-                dist,
-                de,
-                maxmult / (de @ maxmult) + minmult / (de @ minmult),
-            )
-        )
+        gradient_dist = (xe - y[i, :])
+        gradient[e] += (W[i, i] * np.einsum("vd,v,vd->vd", gradient_dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult)))
         # The following line performs slightly better, but the above line is cleaner
         # and used np.einsum, therefore it is OBVIOUSLY better
         # has not added hyperedge node weights below
