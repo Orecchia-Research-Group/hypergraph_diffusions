@@ -29,7 +29,7 @@ end
 functions = {@PDHG_QDSFM_cversion, @QRCDM_cversion, @QRCDM_AP_cversion, @Subgradient_QDSFM_cversion};
 function_names = {'PDHG QDSFM', 'QRCDM', 'QRCDM AP', 'Subgradient QDSFM'};
 iterations = [300, 300 * R, 300, 15000];
-output_file = fopen(fullfile(output_fodler, sprintf("matlab_%s.csv", graph_name)), 'w');
+output_file = fopen(fullfile(output_fodler, sprintf("matlab_lamda_%s.csv", graph_name)), 'w');
 fprintf(output_file, "Graph Name,Method,repeat,seeds,lambda,time,error,fx\n");
 %% Run stuff
 for lam=lambdas
@@ -45,18 +45,18 @@ for lam=lambdas
                 revealed = reveal_index(1:top);
                 bias_vec(:, revealed) = seeds(:, revealed) ./ degree_vec(revealed);
                 x = zeros(num_labels, N);
+                tic;
                 for c=1:num_labels
-                    tic;
                     if strcmp(func_name, 'Subgradient QDSFM')
-                        x(c, :) = clique_expansion(incidence_list, parameter_homo_list, bias_vec(c, :), lam, N, R);
+                        [x(c, :), ~] = func(incidence_list, parameter_homo_list, submodular_type, bias_vec(c, :), W, N, R, T,T+1);
                     else
-                        [x(c, :), ~, final_gap] = func(incidence_list, parameter_homo_list, submodular_type, bias_vec(c, :), W, N, R, T,T+1);
+                        [x(c, :), ~, ~] = func(incidence_list, parameter_homo_list, submodular_type, bias_vec(c, :), W, N, R, T,T+1);
                     end
-                    time = toc;
                 end
+                time = toc;
                 % [~, conductance, ~] = sign_invariant_performance_eval(incidence_list, parameter_homo_list, x, degree_vec, N, R);
                 [~, predicted_label] = max(x, [], 1);
-                clustering_err = sum(predicted_label ~= true_labels);
+                clustering_err = sum(predicted_label(reveal_index(top+1:end)) ~= true_labels(reveal_index(top+1:end)));
                    
                 fx = sum((x - bias_vec) .^ 2 * W');
                 for j=1:R
