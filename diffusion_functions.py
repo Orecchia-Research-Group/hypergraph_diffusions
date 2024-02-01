@@ -343,7 +343,7 @@ def diffusion(
         new_x = x[-1] - h * precond_func(gradient)
         # print(np.array([x[-1].reshape(-1), cut_gradient.reshape(-1), label_gradient.reshape(-1), gradient.reshape(-1), dx.reshape(-1)]))
         # input()
-        if (len(x) > 2 and crit <= eps) or (T is not None and t >= T):
+        if (T is not None and t >= T):
             if verbose > 0:
                 t_now = datetime.now()
                 print(

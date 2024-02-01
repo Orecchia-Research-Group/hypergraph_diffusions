@@ -307,10 +307,11 @@ def submodular_semisupervised_clustering(hypergraph_dict, seeded_labels, D, data
 
     elif method == 'PPR':
         teleportation_factor = 0.5
-        x0 = np.zeros_like(seeded_labels)
+        # x0 = np.zeros_like(seeded_labels)
+        x0 = (seeded_labels.T / hypergraph_dict['degree']).T / lamda
         s_vector = seeded_labels
         effective_lambda = 2*teleportation_factor/(1-teleportation_factor)
-        step_size = error_tolerance/(2*(1+effective_lambda))
+        step_size = error_tolerance/(2*(1+effective_lambda)) / lamda
 
     if objective == 'cardinality':
         if implementation == 'specialized':
@@ -413,7 +414,7 @@ def main():
     args = parse_args()
     print(args)
     np.random.seed(42)
-    with open(args.filename, 'w+') as result_output:
+    with open(args.filename, 'w') as result_output:
         print('Graph Name,buckets,repeat,seeds,lambda,iteration,time,error,gap', file=result_output)
         if args.buckets is None:
             args.buckets = [DEFAULT_BUCKETS]
