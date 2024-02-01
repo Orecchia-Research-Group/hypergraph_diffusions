@@ -8,6 +8,7 @@
 #include <map>
 #include <iterator>
 #include <chrono>
+#include <ctime>
 
 
 using namespace std;
@@ -104,7 +105,7 @@ void diffusion(int n, int m, const vector<double> degree, const vector<vector<in
             gradient[i] += lambda * degree[i] * x[i] - s[i];
             x[i] -= h * gradient[i] / degree[i];
             solution[i] += x[i];
-            fx[t] += lambda * degree[i] * (x[i] - s[i] / degree[i]) * (x[i] - s[i] / degree[i]);
+            fx[t] += lambda * degree[i] * (x[i] - s[i] / degree[i] / lambda) * (x[i] - s[i] / degree[i] / lambda);
         }
     }
     for(int i = 0; i < n; i++) {
@@ -146,6 +147,7 @@ int main(int argc, char* argv[]) {
         order[i] = i;
     }
 
+    srand(unsigned(time(0)));
     const auto start{chrono::steady_clock::now()};
     for(int r = 0; r < label_count; r++) {
         for(int i = 0; i < n; i++) {
