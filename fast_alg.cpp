@@ -70,7 +70,7 @@ inline double fmin(double a, double b) {
     return a < b ? a : b;
 }
 
-void diffusion(int n, int m, const vector<double> degree, const vector<vector<int>> hypergraph, double x[], double s[], int T, double lambda, double h, double fx[], double solution[]) {
+void diffusion(int n, int m, const vector<double> degree, const vector<vector<int>> hypergraph, double x[], double s[], int T, double lambda, double h, double solution[]) {
     double gradient[n];
     for(int t = 0; t < T; t++) {
         for(int i = 0; i < n; i++)
@@ -85,7 +85,6 @@ void diffusion(int n, int m, const vector<double> degree, const vector<vector<in
                 ymax = fmax(ymax, x[*it]);
             }
             double u = ymin + (ymax - ymin) / 2;
-            fx[t] += (ymax - ymin) * (ymax - ymin);
             double total_min_degree = 0;
             double total_max_degree = 0;
             bool is_max[n];
@@ -105,12 +104,30 @@ void diffusion(int n, int m, const vector<double> degree, const vector<vector<in
             gradient[i] += lambda * degree[i] * x[i] - s[i];
             x[i] -= h * gradient[i] / degree[i];
             solution[i] += x[i];
-            fx[t] += lambda * degree[i] * (x[i] - s[i] / degree[i] / lambda) * (x[i] - s[i] / degree[i] / lambda);
         }
     }
     for(int i = 0; i < n; i++) {
         solution[i] /= T;
     }
+}
+
+double compute_fx(int n, int m, vector<double> degree, vector<vector<int>> hypergraph, double x[], double s[], double lambda) {
+    double fx = 0;
+    for(int j = 0; j < m; j++) { 
+        if(hypergraph[j].size() == 0)
+            continue;
+        double ymin = INFINITY;
+        double ymax = -INFINITY;
+        for(auto it = hypergraph[j].begin(); it != hypergraph[j].end(); it++) {
+            ymin = fmin(ymin, x[*it]);
+            ymax = fmax(ymax, x[*it]);
+        }
+        fx += (ymax - ymin) * (ymax - ymin);
+    }
+    for(int i = 0; i < n; i++) {
+        fx += lambda * degree[i] * (x[i] - s[i] / lambda / degree[i]) * (x[i] - s[i] / lambda / degree[i]);
+    }
+    return fx;
 }
 
 
@@ -121,7 +138,7 @@ int main(int argc, char* argv[]) {
     vector<vector<int>> hypergraph;
     vector<double> degree;
     vector<int> labels;
-    if(argc != 7) {
+    if(argc != 10) {
         cerr << "Wrong number of arguments" << endl;
         return -1;
     }
@@ -131,16 +148,16 @@ int main(int argc, char* argv[]) {
     int T = stoi(argv[3]);
     double lambda = stod(argv[4]);
     double h = stod(argv[5]);
-    int revealed = stoi(argv[6]);
+    int minimum_revealed = stoi(argv[6]);
+    int step = stoi(argv[7]);
+    int maximum_revealed = stoi(argv[8]);
+    int repeats = stoi(argv[9]);
 
     double seed[label_count][n+2];
     double x[label_count][n+2];
     double solution[label_count][n+2];
-    double fx[T];
+    double fx;
     int predicted_labels[n+2];
-
-    for(int t = 0; t < T; t++)
-        fx[t] = 0;
 
     int order[n];
     for(int i = 0; i < n; i++) {
@@ -148,30 +165,44 @@ int main(int argc, char* argv[]) {
     }
 
     srand(unsigned(time(0)));
-    const auto start{chrono::steady_clock::now()};
     for(int r = 0; r < label_count; r++) {
         for(int i = 0; i < n; i++) {
             x[r][i] = seed[r][i] = solution[r][i] = 0;
         }
-        random_shuffle(order, order+n);
-        for(int i = 0; i < revealed; i++) {
-            int node = order[i];
-            seed[r][node] = lambda * (2 * (labels[node] == r) - 1);
-            x[r][node] = seed[r][node] / degree[node] / lambda;
-        }
-        diffusion(n, m, degree, hypergraph, x[r], seed[r], T, lambda, h, fx, solution[r]);
-        for(int i = 0; i < n; i++)
-            if(solution[predicted_labels[i]][i] < solution[r][i])
-                predicted_labels[i] = r;
     }
-    const auto end{chrono::steady_clock::now()};
-    const chrono::duration<double> time{end - start};
-    double error = 0;
-    for(int i = 0; i < n; i++)
-        error += (predicted_labels[i] != labels[i]);
-    // for(int t=0; t < T; t++)
-    //    cout << t+1 << " " << fx[t] << endl;
-    cout << argv[1] << ",C++," << revealed << "," << lambda << "," << time.count() << "," << error / n << "," << fx[T-1] << endl;
 
+    // Multiple repeats
+    for(int repeat = 0; repeat < repeats; repeat++) {
+        // Run for different number of revealed
+        random_shuffle(order, order+n);
+        for(int revealed = minimum_revealed; revealed <= maximum_revealed; revealed += step) {
+            const auto start{chrono::steady_clock::now()};
+            fx = 0;
+            for(int i = 0; i < n; i++)
+                predicted_labels[i] = 0;
+            for(int r = 0; r < label_count; r++) {
+                for(int i = 0; i < n; i++) {
+                    x[r][i] = seed[r][i] = solution[r][i] = 0;
+                }
+                for(int i = 0; i < revealed; i++) {
+                    int node = order[i];
+                    seed[r][node] = lambda * (2 * (labels[node] == r) - 1);
+                }
+                diffusion(n, m, degree, hypergraph, x[r], seed[r], T, lambda, h, solution[r]);
+                for(int i = 0; i < n; i++)
+                    if(solution[predicted_labels[i]][i] < solution[r][i])
+                        predicted_labels[i] = r;
+                fx += compute_fx(n, m, degree, hypergraph, solution[r], seed[r], lambda);
+            }
+            const auto end{chrono::steady_clock::now()};
+            const chrono::duration<double> time{end - start};
+            double error = 0;
+            for(int i = 0; i < n; i++)
+                error += (predicted_labels[i] != labels[i]);
+            // for(int t=0; t < T; t++)
+            //    cout << t+1 << " " << fx[t] << endl;
+            cout << argv[1] << ",C++," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << error / n << "," << fx / label_count << endl;
+        }
+    }
     return 0;
 }
