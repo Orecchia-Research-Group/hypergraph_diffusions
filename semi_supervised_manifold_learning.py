@@ -145,6 +145,92 @@ def generate_concentric_rectangles(
     return clean_data, noisy_data
 
 
+def generate_concentric_highdim_rectangles(
+    n_pts=300,
+    inner_sidelengths=[1, 3],
+    outer_sidelengths=[2, 4],
+    noise_level=0.1,
+    verbose=True,
+):
+    if len(inner_sidelengths) != len(outer_sidelengths):
+        raise Exception("Dimensionality of both rectangles must agree.")
+
+    inner_ball = uniform_highdim_rectangle_interior_sampler(
+        num_samples=n_pts, sidelengths=inner_sidelengths
+    )
+    outer_shell = uniform_highdim_rectangle_surface_sampler(
+        num_samples=n_pts, sidelengths=outer_sidelengths
+    )
+    clean_data = np.vstack((inner_ball, outer_shell))
+    noisy_data = clean_data + np.random.normal(
+        scale=noise_level, size=(2 * n_pts, len(inner_sidelengths))
+    )
+
+    if verbose:
+        plt.scatter(noisy_data[:, 0], noisy_data[:, 1])
+        plt.show()
+    return clean_data, noisy_data
+
+
+def uniform_highdim_rectangle_surface_sampler(num_samples, sidelengths=[4, 2, 1]):
+    def _list_without_entry(list, index):
+        list_copy = list.copy()
+        del list_copy[index]
+        return list_copy
+
+    areas = [
+        np.product(_list_without_entry(sidelengths, idx))
+        for idx in range(len(sidelengths))
+    ]
+
+    # randomly return an index in range(len(list)) with value proportionate to the
+    # corresponding entry of list
+    def _sample_proportionate_to_value(list):
+        cummulative_sums = [np.sum(list[: idx + 1]) for idx in range(len(list))]
+        # draw random number uniformly from (0, max(cummulative_sums))
+        cutoff = np.random.uniform(low=0, high=cummulative_sums[-1])
+        above_cutoff = [s > cutoff for s in cummulative_sums]
+        # there must be at least one index whose value is above the cutoff.
+        assert np.sum(above_cutoff) > 0
+        for idx in range(len(list)):
+            if above_cutoff[idx]:
+                return idx
+
+    data = uniform_highdim_rectangle_interior_sampler(num_samples, sidelengths)
+    for sample_idx in range(num_samples):
+        # sample an axis-alignement w probability proportionate to area
+        sampled_axis = _sample_proportionate_to_value(areas)
+        # flip a coin to decide if which of the two axis aligned faces this point will lie on
+        sampled_face = np.random.choice([-1, 1])
+        face_coordinate = sampled_face * sidelengths[sampled_axis] / 2
+        # snap the datapoint to the sampled face
+        data[sample_idx, sampled_axis] = face_coordinate
+
+    return data
+
+
+# returns a numpy array of size num_samples x len(sidelengths)
+def uniform_highdim_rectangle_interior_sampler(num_samples, sidelengths=[4, 2, 1]):
+    data = np.random.uniform(
+        low=-0.5 * sidelengths[0],
+        high=0.5 * sidelengths[0],
+        size=(num_samples),
+    )
+    for idx in range(1, len(sidelengths)):
+        data = np.vstack(
+            (
+                data,
+                np.random.uniform(
+                    low=-0.5 * sidelengths[idx],
+                    high=0.5 * sidelengths[idx],
+                    size=(num_samples),
+                ),
+            )
+        )
+    data = data.T
+    return data
+
+
 # randomly samples from surface of a 2D rectangule (i.e. perimeter of a rectangle) centered at (0,0)
 def uniform_rectangle_sampler(num_samples, x_sidelength=2, y_sidelength=4):
     center = (0, 0)
@@ -344,7 +430,7 @@ def build_knn_graph(data_matrix, k):
 
 
 # data_matrix has shape (num_nodes x embedding_dimension)
-def create_node_weights(method, data_matrix, hgraph_dict, ord=1):
+def create_node_weights(method, data_matrix, hgraph_dict, ord=2):
     # hypergraph_node_weights is keyed by the tuple specifying the hyperedge.
     # For each hyperedge, it's entry is an array of weights for each node in that hyperedge.
     hypergraph_node_weights = dict()
@@ -435,6 +521,35 @@ def eval_graph_cut_fn(D, A, s, x):
     L = np.eye(n) - D_inv @ A
 
     return graph_quadratic(L, x)  # - s@x
+
+
+# accepts the same methods as create_hypergraph_node_weights
+def create_weighted_adj_mat(method, data_matrix, adj_mat, ord=2):
+    adj_mat = adj_mat.todense()
+    # adjacency matrix should by symmetric (undirected graph)
+    assert np.all(np.isclose(adj_mat, adj_mat.T))
+    weighted_adj_mat = np.full(shape=adj_mat.shape, fill_value=np.nan)
+    # 'gaussian_to_central_neighbor' corresponds to gaussian_kernel(||x_i-x_j||^2_ord) for graphs
+    # 'gaussian_to_centroid' corresponds to gaussian_kernel((1/2||x_i-x_j||)^2_ord) for graphs
+    # i.e. gaussian_kernel(1/4 * ||x_i-x_j||^2_ord)
+    if method == "gaussian_to_central_neighbor" or method == "gaussian_to_centroid":
+        for ii in range(adj_mat.shape[0]):
+            # fill in upper diagonal entries
+            for jj in range(ii, adj_mat.shape[0]):
+                if adj_mat[ii, jj] == 0:
+                    weighted_adj_mat[ii, jj] = 0
+                else:
+                    difference = data_matrix[ii, :] - data_matrix[jj, :]
+                    if method == "gaussian_to_centroid":
+                        difference /= 2
+                    weighted_adj_mat[ii, jj] = gaussian_kernel(difference, ord=ord)
+        # symmetrize, ignoring nan's
+        weighted_adj_mat = np.nansum(
+            np.stack((weighted_adj_mat, weighted_adj_mat.T)), axis=0
+        )
+        # divide diagonals to avoid double-counting
+        weighted_adj_mat[np.diag_indices_from(weighted_adj_mat)] /= 2
+    return weighted_adj_mat
 
 
 def graph_diffusion(x0, D, A, s=None, h=0.5, T=100, verbose=True):
@@ -555,12 +670,20 @@ def diffusion_knn_clustering(
 
     # now run the vanilla graph diffusion
     # STEP SIZE 1/2
+    # compute degree from weighted matrix? or use combinatorial degree (as we do with hypergraphs)?
+    graph_D = np.squeeze(np.asarray(np.sum(knn_adj_matrix, axis=0)))
     x, y, fx = graph_diffusion(
-        x0, D, knn_adj_matrix, s=s_vector, h=0.5, T=num_iterations, verbose=verbose
+        x0,
+        graph_D,
+        knn_adj_matrix,
+        s=s_vector,
+        h=0.5,
+        T=num_iterations,
+        verbose=verbose,
     )
 
     graph_cut_objective = lambda vec: eval_graph_cut_fn(
-        D, knn_adj_matrix, s_vector, vec
+        graph_D, knn_adj_matrix, s_vector, vec
     )
     graph_diff_results = dict(
         {"x": x, "y": y, "fx": fx, "objective": graph_cut_objective, "type": "graph"}
@@ -659,6 +782,7 @@ def compare_estimated_labels(
     diffusion_step_size=None,
     titlestring=None,
     node_weight_method=None,
+    order=2,
 ):
     # generate new data
     _, data_matrix = generate_data(verbose=False)
@@ -672,14 +796,22 @@ def compare_estimated_labels(
             method=node_weight_method,
             data_matrix=data_matrix,
             hgraph_dict=knn_hgraph_dict,
+            ord=order,
+        )
+        weighted_adj_matrix = create_weighted_adj_mat(
+            method=node_weight_method,
+            data_matrix=data_matrix,
+            adj_mat=knn_adj_matrix,
+            ord=order,
         )
     else:
         hypergraph_node_weights = None
+        weighted_adj_matrix = knn_adj_matrix
 
     # run diffusion
     if method == "diffusion":
         hypergraph_diff_results, graph_diff_results = diffusion_knn_clustering(
-            knn_adj_matrix,
+            weighted_adj_matrix,
             knn_hgraph_dict,
             num_iterations=num_iterations,
             verbose=True,
@@ -691,7 +823,7 @@ def compare_estimated_labels(
 
     elif method == "PPR":
         hypergraph_PPR_results, graph_PPR_results = PPR_knn_clustering(
-            knn_adj_matrix,
+            weighted_adj_matrix,
             knn_hgraph_dict,
             error_tolerance=0.1,
             teleportation_factor=0.5,
