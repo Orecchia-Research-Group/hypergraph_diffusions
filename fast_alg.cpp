@@ -15,80 +15,52 @@
 #include <Eigen/IterativeLinearSolvers>
 
 class MatrixReplacement;
-template<typename Rhs> class MatrixReplacement_ProductReturnType;
 
 namespace Eigen {
-namespace internal {
-    template<>
-    struct traits<MatrixReplacement> :  Eigen::internal::traits<Eigen::SparseMatrix<double> > {};
-    template <typename Rhs>
-    struct traits<MatrixReplacement_ProductReturnType<Rhs> > {
-        // The equivalent plain objet type of the product. This type is used if the product needs to be evaluated into a temporary.
-        typedef Eigen::Matrix<typename Rhs::Scalar, Eigen::Dynamic, Rhs::ColsAtCompileTime> ReturnType;
-    };
-}
+    namespace internal {
+        template<>
+        struct traits<MatrixReplacement> :  public Eigen::internal::traits<Eigen::SparseMatrix<double> > {};
+    }
 }
 
-// Inheriting EigenBase should not be needed in the future.
 class MatrixReplacement : public Eigen::EigenBase<MatrixReplacement> {
-public:
-    // Expose some compile-time information to Eigen:
-    typedef double Scalar;
-    typedef double RealScalar;
-    enum {
-        ColsAtCompileTime = Eigen::Dynamic,
-        RowsAtCompileTime = Eigen::Dynamic,
-        MaxColsAtCompileTime = Eigen::Dynamic,
-        MaxRowsAtCompileTime = Eigen::Dynamic
-    };
-    Eigen::SparseMatrix<double> A;
+    public:
+        // Required typedefs, constants, and method:
+        typedef double Scalar;
+        typedef double RealScalar;
+        typedef int StorageIndex;
+        enum {
+            ColsAtCompileTime = Eigen::Dynamic,
+            MaxColsAtCompileTime = Eigen::Dynamic,
+            IsRowMajor = false
+        };
 
-    MatrixReplacement(Eigen::SparseMatrix<double> A): A(A) {}
+        Index rows() const { return mp_mat->rows(); }
+        Index cols() const { return mp_mat->cols(); }
 
-    Index rows() const { return A.rows(); }
-    Index cols() const { return A.cols(); }
+        template<typename Rhs>
+        Eigen::VectorXd operator*(const Eigen::MatrixBase<Rhs>& x) const {
+            Eigen::VectorXd y = (*mp_mat) * x;
+            double x_sum = x.sum();
+            for(int i = 0; i < y.size(); i++)
+                y(i) += x_sum;
+            return y;
+        }
 
-    void resize(Index a_rows, Index a_cols)  {
-        // This method should not be needed in the future.
-        assert((a_rows==0 && a_cols==0) || (a_rows==rows() && a_cols==cols()));
-    }
+        void attachMyMatrix(const Eigen::SparseMatrix<double> &mat) {
+            mp_mat = &mat;
+        }
+        const Eigen::SparseMatrix<double> my_matrix() const { return *mp_mat; }
 
-    // In the future, the return type should be Eigen::Product<MatrixReplacement,Rhs>
-    template<typename Rhs>
-    MatrixReplacement_ProductReturnType<Rhs> operator*(const Eigen::MatrixBase<Rhs>& x) const {
-        return MatrixReplacement_ProductReturnType<Rhs>(*this, x.derived());
-    }
-};
-
-// The proxy class representing the product of a MatrixReplacement with a MatrixBase<>
-template<typename Rhs>
-class MatrixReplacement_ProductReturnType : public Eigen::ReturnByValue<MatrixReplacement_ProductReturnType<Rhs> > {
-public:
-    typedef MatrixReplacement::Index Index;
-    
-    // The ctor store references to the matrix and right-hand-side object (usually a vector).
-    MatrixReplacement_ProductReturnType(const MatrixReplacement& matrix, const Rhs& rhs)
-      : m_matrix(matrix), m_rhs(rhs)
-    {}
-      
-    Index rows() const { return m_matrix.rows(); }
-    Index cols() const { return m_rhs.cols(); }
-
-    // This function is automatically called by Eigen. It must evaluate the product of matrix * rhs into y.
-    template<typename Dest>
-    void evalTo(Dest& y) const {
-        y.setZero(4);
-        y = m_matrix * m_rhs + m_rhs.sum();
-    }
-
-protected:
-    const MatrixReplacement& m_matrix;
-    typename Rhs::Nested m_rhs;
+    private:
+        const Eigen::SparseMatrix<double> *mp_mat;
 };
 
 class GraphSolver {
 private:
-    Eigen::BiCGSTAB<Eigen::SparseMatrix<double> > solver;
+    Eigen::BiCGSTAB<MatrixReplacement, Eigen::IdentityPreconditioner> solver;
+    Eigen::SparseMatrix<double> starLaplacian;
+    MatrixReplacement L;
 
     void read_hypergraph(char filename[]) {
         int fmt;
@@ -148,13 +120,12 @@ private:
         Eigen::SparseMatrix<double> laplacian(n+m, n+m);
         for(int j = 0; j < m; j++) {
             auto h = hypergraph[j].size();
-            auto weight = 1.0 / h;
-            laplacian.coeffRef(n+j, n+j) = 1;
+            laplacian.coeffRef(n+j, n+j) = h;
             for(auto it = hypergraph[j].begin(); it < hypergraph[j].end(); it++) {
                 auto v = *it;
-                laplacian.coeffRef(v, v) += weight;
-                laplacian.coeffRef(v, n+j) = -weight;
-                laplacian.coeffRef(n+j, v) = -weight;
+                laplacian.coeffRef(v, v) += 1;
+                laplacian.coeffRef(v, n+j) = -1;
+                laplacian.coeffRef(n+j, v) = -1;
             }
         }
         return laplacian;
@@ -173,26 +144,24 @@ public:
 
     Eigen::VectorXd solution;                   // Most recent solution
 
-    //GraphSolver(char graph_filename[], char label_filename[]=NULL);
-    //GraphSolver(int n, int m, std::vector<double> degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>());
-
-
     GraphSolver(char graph_filename[], char label_filename[]=NULL, char preconditioner[]=NULL) {
         read_hypergraph(graph_filename);
         if(label_filename) read_labels(label_filename);
-        if(!preconditioner || strcmp(preconditioner, "degree")) preconditionerType = 0;
-        else if(strcmp(preconditioner, "star")) {
+        if(!preconditioner || strcmp(preconditioner, "degree") == 0) preconditionerType = 0;
+        else if(strcmp(preconditioner, "star") == 0) {
             preconditionerType = 1;
-            auto starLaplacian = create_laplacian();
-            solver.compute(starLaplacian);
+            starLaplacian = create_laplacian();
+            L.attachMyMatrix(starLaplacian);
+            solver.compute(L);
         }
         else {
             perror("Unknown type of preconditioner.");
             exit(1);
         }
+        std::cerr << "Constructed hypergraph with " << n << " nodes and " << m << " hyperedges" << std::endl;
     }
 
-    GraphSolver(int n, int m, std::vector<double> degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>()): 
+    GraphSolver(int n, int m, std::vector<double> degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>()):
         n(n), m(m), degree(degree), hypergraph(hypergraph), label_count(label_count), labels(labels) {};
 
     Eigen::VectorXd infinity_subgradient(Eigen::VectorXd x) {
@@ -244,7 +213,13 @@ public:
                     for(int i = 0; i < n; i++) dx(i)  = gradient(i) / degree[i];
                     break;
                 case 1:
-                    dx = solver.solve(gradient);
+                    Eigen::VectorXd augmented(n+m);
+                    Eigen::VectorXd conditioned(n+m);
+                    augmented.setZero();
+                    augmented(Eigen::seq(0, n-1)) = gradient;
+                    conditioned = solver.solve(augmented);
+                    dx = conditioned(Eigen::seq(0, n-1));
+                    // std::cout << t << ' ';
                     break;
             }
             x -= h * dx;
@@ -258,7 +233,7 @@ public:
 
     double compute_fx(Eigen::VectorXd x, Eigen::VectorXd s, double lambda) {
         double fx = 0;
-        for(int j = 0; j < m; j++) { 
+        for(int j = 0; j < m; j++) {
             if(hypergraph[j].size() == 0)
                 continue;
             double ymin = INFINITY;
@@ -330,11 +305,11 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    if(argc != 10) {
+    if(argc != 11) {
         std::cerr << "Wrong number of arguments" << std::endl;
         return -1;
     }
-    GraphSolver G(argv[1], argv[2], "star");
+    GraphSolver G(argv[1], argv[2], argv[10]);
     int T = std::stoi(argv[3]);
     double lambda = std::stod(argv[4]);
     double h = std::stod(argv[5]);
