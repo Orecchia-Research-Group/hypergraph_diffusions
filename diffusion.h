@@ -1,0 +1,71 @@
+#pragma once
+
+#include <Eigen/Sparse>
+
+class MatrixReplacement;
+
+namespace Eigen {
+    namespace internal {
+        template<>
+        struct traits<MatrixReplacement> :  public Eigen::internal::traits<Eigen::SparseMatrix<double> > {};
+    }
+}
+
+class MatrixReplacement : public Eigen::EigenBase<MatrixReplacement> {
+    public:
+        // Required typedefs, constants, and method:
+        typedef double Scalar;
+        typedef double RealScalar;
+        typedef int StorageIndex;
+        enum {
+            ColsAtCompileTime = Eigen::Dynamic,
+            MaxColsAtCompileTime = Eigen::Dynamic,
+            IsRowMajor = false
+        };
+
+        Index rows() const;
+        Index cols() const;
+
+        template<typename Rhs>
+        Eigen::VectorXd operator*(const Eigen::MatrixBase<Rhs>& x) const;
+        void attachMyMatrix(const Eigen::SparseMatrix<double> &mat);
+        const Eigen::SparseMatrix<double> my_matrix() const;
+
+    private:
+        const Eigen::SparseMatrix<double> *mp_mat;
+};
+
+
+class GraphSolver {
+private:
+    Eigen::BiCGSTAB<MatrixReplacement, Eigen::IdentityPreconditioner> solver;
+    Eigen::SparseMatrix<double> starLaplacian;
+    MatrixReplacement L;
+
+    void read_hypergraph(std::string filename);
+    void read_labels(std::string filename);
+    Eigen::SparseMatrix<double> create_laplacian();
+    inline double fmax(double a, double b);
+    inline double fmin(double a, double b);
+
+public:
+    int n;                                      // Number of nodes
+    int m;                                      // Number of (hyper)edges
+    std::vector<double> degree;                 // Node weights
+    std::vector<std::vector<int>> hypergraph;   // Hypergraph edges
+    int label_count;                            // Number of labels
+    std::vector<int> labels;                    // Label for each node
+    double lambda;                              // Balancing term for L2 regularizer
+    double h;                                   // Step size
+    int preconditionerType;                     // Kind of preconditioner. 0 is degree, 1 is star
+
+    Eigen::VectorXd solution;                   // Most recent solution
+
+    GraphSolver(std::string graph_filename, std::string label_filename, std::string preconditioner);
+    GraphSolver(int n, int m, std::vector<double> degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>());
+    Eigen::VectorXd infinity_subgradient(Eigen::VectorXd x);
+    Eigen::VectorXd diffusion(const Eigen::VectorXd s, int T, double lambda, double h);
+    double compute_fx(Eigen::VectorXd x, Eigen::VectorXd s, double lambda);
+    void run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed);
+};
+
