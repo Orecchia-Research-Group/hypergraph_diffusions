@@ -51,21 +51,22 @@ private:
 public:
     int n;                                      // Number of nodes
     int m;                                      // Number of (hyper)edges
-    std::vector<double> degree;                 // Node weights
+    Eigen::VectorXd degree;                     // Node weights
     std::vector<std::vector<int>> hypergraph;   // Hypergraph edges
     int label_count;                            // Number of labels
     std::vector<int> labels;                    // Label for each node
-    double lambda;                              // Balancing term for L2 regularizer
-    double h;                                   // Step size
+    int verbose;
+    // double lambda;                              // Balancing term for L2 regularizer
+    // double h;                                   // Step size
     int preconditionerType;                     // Kind of preconditioner. 0 is degree, 1 is star
 
     Eigen::VectorXd solution;                   // Most recent solution
 
-    GraphSolver(std::string graph_filename, std::string label_filename, std::string preconditioner);
-    GraphSolver(int n, int m, std::vector<double> degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>());
-    Eigen::VectorXd infinity_subgradient(Eigen::VectorXd x);
-    Eigen::VectorXd diffusion(const Eigen::VectorXd s, int T, double lambda, double h);
-    double compute_fx(Eigen::VectorXd x, Eigen::VectorXd s, double lambda);
+    GraphSolver(std::string graph_filename, std::string label_filename, std::string preconditioner, int verbose=0);
+    GraphSolver(int n, int m, Eigen::VectorXd degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>(), int verbose=0);
+    Eigen::MatrixXd infinity_subgradient(Eigen::MatrixXd x);
+    Eigen::MatrixXd diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h);
+    double compute_fx(Eigen::MatrixXd x, Eigen::SparseMatrix<double> s, double lambda);
     void run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed);
 };
 
