@@ -106,7 +106,8 @@ Eigen::SparseMatrix<double> GraphSolver::create_laplacian() {
     return laplacian;
 }
 
-GraphSolver::GraphSolver(std::string graph_filename, std::string label_filename, std::string preconditioner, int verbose): verbose(verbose) {
+GraphSolver::GraphSolver(std::string graph_filename, std::string label_filename, std::string preconditioner, int verbose):
+        graph_name(graph_filename), early_stopping(-1), verbose(verbose) {
     read_hypergraph(graph_filename);
     if(!label_filename.empty()) read_labels(label_filename);
     if(!preconditioner.empty() || preconditioner.compare("degree") == 0) preconditionerType = 0;
@@ -124,7 +125,7 @@ GraphSolver::GraphSolver(std::string graph_filename, std::string label_filename,
 }
 
 GraphSolver::GraphSolver(int n, int m, Eigen::VectorXd degree, std::vector<std::vector<int>> hypergraph, int label_count, std::vector<int> labels, int verbose):
-    n(n), m(m), degree(degree), hypergraph(hypergraph), label_count(label_count), labels(labels), verbose(verbose) {};
+    n(n), m(m), graph_name(""), degree(degree), hypergraph(hypergraph), label_count(label_count), labels(labels), early_stopping(-1), verbose(verbose) {};
 
 Eigen::MatrixXd GraphSolver::infinity_subgradient(Eigen::MatrixXd x) {
     size_t d = x.rows();
@@ -163,13 +164,18 @@ Eigen::MatrixXd GraphSolver::infinity_subgradient(Eigen::MatrixXd x) {
 }
 
 Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h) {
+    const auto start{std::chrono::steady_clock::now()};
     int d = s.rows();
+    int t;
+    double best_fx = INFINITY;
+    int best_fx_unchanged = 0;
+    Eigen::MatrixXd best_solution(d, n);
     Eigen::MatrixXd x(d, n);
     Eigen::MatrixXd dx(d, n);
     Eigen::MatrixXd solution(d, n);
     x.setZero();
     solution.setZero();
-    for(int t = 0; t < T; t++) {
+    for(t = 0; t < T; t++) {
         Eigen::MatrixXd gradient = infinity_subgradient(x);
         for(int j = 0; j < d; j++)
             for(int i = 0; i < n; i++) 
@@ -193,18 +199,40 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
                 break;
         }
         x -= h * dx;
-        if(this->verbose > 0) {
-
-        }
         solution += x;
+        
+        double current_fx = this->compute_fx(x, s, lambda);
+        double current_error = this->compute_error(x);
+    
+        double solution_fx = this->compute_fx(solution, s, lambda, t+1);
+        double solution_error = this->compute_error(x);
+
+        if(this->verbose > 0) {
+            const auto current{std::chrono::steady_clock::now()};
+            const std::chrono::duration<double> time{current - start};
+            std::cerr << graph_name << ",C++ x," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << t+1 << "," << current_error << "," << current_fx / label_count << "," << h << std::endl;
+
+            std::cerr << graph_name << ",C++ sol," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << t+1 << "," << solution_error << "," << solution_fx / label_count << "," << h << std::endl;
+        }
+        
+        if(solution_fx < best_fx) {
+            best_fx = solution_fx;
+            best_solution = solution;
+            best_fx_unchanged = 0;
+        }
+
+        if((early_stopping > 0) && (best_fx_unchanged > early_stopping)) {
+            break;
+        }
+        best_fx_unchanged++;
     }
     for(int j = 0; j < d; j++) {
-        solution.row(j) /= T;
+        best_solution.row(j) /= t+1;
     }
-    return solution;
+    return best_solution;
 }
 
-double GraphSolver::compute_fx(Eigen::MatrixXd x, Eigen::SparseMatrix<double> s, double lambda) {
+double GraphSolver::compute_fx(Eigen::MatrixXd x, Eigen::SparseMatrix<double> s, double lambda, int t) {
     double fx = 0;
     for(int k = 0; k < s.rows(); k++) {
         for(int j = 0; j < m; j++) {
@@ -216,20 +244,42 @@ double GraphSolver::compute_fx(Eigen::MatrixXd x, Eigen::SparseMatrix<double> s,
                 ymin = fmin(ymin, x(k, *it));
                 ymax = fmax(ymax, x(k, *it));
             }
-            fx += (ymax - ymin) * (ymax - ymin);
+            fx += (ymax - ymin) * (ymax - ymin) / (t * t);
         }
         for(int i = 0; i < n; i++) {
-            fx += lambda * degree(i) * (x(k, i) - s.coeff(k, i) / lambda / degree(i)) * (x(k, i) - s.coeff(k, i) / lambda / degree(i));
+            fx += lambda * degree(i) * (x(k, i) / t - s.coeff(k, i) / lambda / degree(i)) * (x(k, i) / t - s.coeff(k, i) / lambda / degree(i));
         }
     }
     return fx;
 }
 
+double GraphSolver::compute_error(Eigen::MatrixXd x) {
+    double error = 0;
+    double * max_sol = new double[n];
+    double * predicted_labels = new double[n];
+    for(int i = 0; i < n; i++) {
+        predicted_labels[i] = 0;
+        max_sol[i] = -INFINITY;
+    }
+    for(int r = 0; r < label_count; r++)
+        for(int i = 0; i < n; i++)
+            if(max_sol[i] < x(r, i)) {
+                predicted_labels[i] = r;
+                max_sol[i] = x(r, i);
+            }
+    for(int i = 0; i < n; i++)
+        error += (predicted_labels[i] != labels[i]);
+    delete[] predicted_labels;
+    delete[] max_sol;
+    return error / n;
+}
+
 void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed) {
     Eigen::SparseMatrix<double> seed(label_count, n);
-    double * max_sol = new double[n];
     double fx;
-    double * predicted_labels = new double[n];
+
+    // if(this->verbose > 0)
+    //     std::cerr << "Graph Name,Method,repeat,seeds,lambda,time,iteration,error,fx,h" << std::endl;
 
     int * order = new int[n];
     for(int i = 0; i < n; i++) {
@@ -239,17 +289,12 @@ void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, dou
     srand(unsigned(time(0)));
 
     // Multiple repeats
-    for(int repeat = 0; repeat < repeats; repeat++) {
+    for(repeat = 0; repeat < repeats; repeat++) {
         seed.setZero();
         // Run for different number of revealed
         std::random_shuffle(order, order+n);
-        for(int revealed = minimum_revealed; revealed <= maximum_revealed; revealed += step) {
+        for(revealed = minimum_revealed; revealed <= maximum_revealed; revealed += step) {
             const auto start{std::chrono::steady_clock::now()};
-            fx = 0;
-            for(int i = 0; i < n; i++) {
-                predicted_labels[i] = 0;
-                max_sol[i] = -INFINITY;
-            }
             for(int r = 0; r < label_count; r++) {
                 for(int i = 0; i < revealed; i++) {
                     int node = order[i];
@@ -257,24 +302,14 @@ void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, dou
                 }
             }
             auto solution = diffusion(seed, T, lambda, h);
-            for(int r = 0; r < label_count; r++)
-                for(int i = 0; i < n; i++)
-                    if(max_sol[i] < solution(r, i)) {
-                        predicted_labels[i] = r;
-                        max_sol[i] = solution(r, i);
-                    }     
-            fx += compute_fx(solution, seed, lambda);
+            fx = compute_fx(solution, seed, lambda);
             const auto end{std::chrono::steady_clock::now()};
             const std::chrono::duration<double> time{end - start};
-            double error = 0;
-            for(int i = 0; i < n; i++)
-                error += (predicted_labels[i] != labels[i]);
+            double error = compute_error(solution);
             // for(int t=0; t < T; t++)
             //    cout << t+1 << " " << fx[t] << endl;
-            std::cout << graph_name << ",C++," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << error / n << "," << fx / label_count << "," << h << std::endl;
+            std::cout << graph_name << ",C++," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << error << "," << fx / label_count << "," << h << std::endl;
         }
     }
-    delete[] max_sol;
-    delete[] predicted_labels;
     delete[] order;
 }
