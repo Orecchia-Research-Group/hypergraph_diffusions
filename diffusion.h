@@ -67,9 +67,9 @@ public:
     GraphSolver(std::string graph_filename, std::string label_filename, std::string preconditioner, int verbose=0);
     GraphSolver(int n, int m, Eigen::VectorXd degree, std::vector<std::vector<int>> hypergraph, int label_count=0, std::vector<int> labels=std::vector<int>(), int verbose=0);
     Eigen::MatrixXd infinity_subgradient(Eigen::MatrixXd x);
-    Eigen::MatrixXd diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h);
+    Eigen::MatrixXd diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h, int schedule=0);
     double compute_fx(Eigen::MatrixXd x, Eigen::SparseMatrix<double> s, double lambda, int t=1);
     double compute_error(Eigen::MatrixXd x);
-    void run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed);
+    void run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed, int schedule=0);
 };
 

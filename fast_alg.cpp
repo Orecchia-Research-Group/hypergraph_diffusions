@@ -18,6 +18,7 @@ int main(int argc, char* argv[]) {
     int maximum_revealed;
     int repeats;
     int early_stopping;
+    int schedule;
     int verbose;
 
     cxxopts::Options options(argv[0], "Run SemiSupervised Learning (SSL) Hypergraph Graph experiments.");
@@ -33,6 +34,7 @@ int main(int argc, char* argv[]) {
         ("maximum_revealed", "Maximum number of labels revealed", cxxopts::value(maximum_revealed))
         ("r,repeats", "Minimum number of labels revealed", cxxopts::value(repeats))
         ("e,early_stopping", "Number of solution non-decreasing iterations before early stopping", cxxopts::value(early_stopping)->default_value("10"))
+        ("schedule", "Step size schedule. 0 is for constant, 1 is for h / sqrt(t)", cxxopts::value(schedule)->default_value("0"))
         ("v,verbose", "Verbose mode. Prints out useful information");
 
     auto args = options.parse(argc, argv);
@@ -46,6 +48,6 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
     
-    G.run_diffusions(graph_filename, repeats, T, lambda, h, minimum_revealed, step, maximum_revealed);
+    G.run_diffusions(graph_filename, repeats, T, lambda, h, minimum_revealed, step, maximum_revealed, schedule);
     return 0;
 }

@@ -163,10 +163,14 @@ Eigen::MatrixXd GraphSolver::infinity_subgradient(Eigen::MatrixXd x) {
     return gradient;
 }
 
-Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h) {
+Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h, int schedule) {
+    // schedule:
+    //      0 --> h
+    //      1 --> h / sqrt(t + 1)
     const auto start{std::chrono::steady_clock::now()};
     int d = s.rows();
     int t;
+    double step = h;
     double best_fx = INFINITY;
     int best_fx_unchanged = 0;
     Eigen::MatrixXd best_solution(d, n);
@@ -198,7 +202,13 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
                 }
                 break;
         }
-        x -= h * dx;
+        switch(schedule) {
+            case 0:
+                break;
+            case 1:
+                step = h / sqrt(t + 1);
+        }
+        x -= step * dx;
         solution += x;
         
         double current_fx = this->compute_fx(x, s, lambda);
@@ -274,7 +284,7 @@ double GraphSolver::compute_error(Eigen::MatrixXd x) {
     return error / n;
 }
 
-void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed) {
+void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, double lambda, double h, int minimum_revealed, int step, int maximum_revealed, int schedule) {
     Eigen::SparseMatrix<double> seed(label_count, n);
     double fx;
 
@@ -301,7 +311,7 @@ void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, dou
                     seed.coeffRef(r, node) = lambda * (2 * (labels[node] == r) - 1);
                 }
             }
-            auto solution = diffusion(seed, T, lambda, h);
+            auto solution = diffusion(seed, T, lambda, h, schedule);
             fx = compute_fx(solution, seed, lambda);
             const auto end{std::chrono::steady_clock::now()};
             const std::chrono::duration<double> time{end - start};
