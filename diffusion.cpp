@@ -167,7 +167,11 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
     // schedule:
     //      0 --> h
     //      1 --> h / sqrt(t + 1)
+    //      2 --> constant, divided by sqrt(2) at early stopping
+    //      3 --> h / sqrt(t + 1) where h is divided by sqrt(2) every early stopping
     const auto start{std::chrono::steady_clock::now()};
+    int function_stopping = early_stopping;
+    int best_t = 1;
     int d = s.rows();
     int t;
     double step = h;
@@ -202,7 +206,7 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
                 }
                 break;
         }
-        switch(schedule) {
+        switch(schedule % 2) {
             case 0:
                 break;
             case 1:
@@ -229,15 +233,24 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
             best_fx = solution_fx;
             best_solution = solution;
             best_fx_unchanged = 0;
+            best_t = t + 1;
         }
 
-        if((early_stopping > 0) && (best_fx_unchanged > early_stopping)) {
-            break;
+        if((function_stopping > 0) && (best_fx_unchanged > function_stopping)) {
+            if((schedule / 2) % 2) {        // Second LSB is 1
+                best_fx_unchanged = 0;
+                function_stopping *= sqrt(2);
+                if(h < 1e-2)
+                    break;
+                h /= sqrt(2);
+            }
+            else
+                break;
         }
         best_fx_unchanged++;
     }
     for(int j = 0; j < d; j++) {
-        best_solution.row(j) /= t+1;
+        best_solution.row(j) /= best_t;
     }
     return best_solution;
 }
