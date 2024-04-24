@@ -224,9 +224,9 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
         if(this->verbose > 0) {
             const auto current{std::chrono::steady_clock::now()};
             const std::chrono::duration<double> time{current - start};
-            std::cerr << graph_name << ",C++ x," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << t+1 << "," << current_error << "," << current_fx / label_count << "," << h << std::endl;
+            std::cerr << graph_name << ",C++ x," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << t+1 << "," << schedule << "," << current_error << "," << current_fx / label_count << "," << h << std::endl;
 
-            std::cerr << graph_name << ",C++ sol," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << t+1 << "," << solution_error << "," << solution_fx / label_count << "," << h << std::endl;
+            std::cerr << graph_name << ",C++ sol," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << t+1 << ","  << schedule << "," << solution_error << "," << solution_fx / label_count << "," << h << std::endl;
         }
         
         if(solution_fx < best_fx) {
