@@ -477,15 +477,13 @@ def create_node_weights(method, data_matrix, hgraph_dict, ord=2):
 
 
 # Option to normalize by dimension of x: 1/sqrt(sigma^2*(2*pi)^d)*exp(-||x||^2_2/ 2*sigma^2)
-def gaussian_kernel(x_vec, sigma=1, normalize=False, ord=2):
+def gaussian_kernel(x_vec, sigma=2, normalize=False, ord=2):
     if normalize:
         dim = x_vec.size
         normalization = np.divide(1, sigma * np.sqrt((2 * np.pi) ** dim))
     else:
         normalization = 1
-    return normalization * np.exp(
-        -np.linalg.norm(x_vec, ord=ord) ** 2 / (2 * sigma**2)
-    )
+    return normalization * np.exp(-np.linalg.norm(x_vec, ord=ord) ** 2 / (2 * sigma**2))
 
 
 # iterates through all hyperedges, confirming whether the first entry of the ith hyperedge is node i
