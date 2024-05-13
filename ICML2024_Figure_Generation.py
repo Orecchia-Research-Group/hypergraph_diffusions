@@ -162,15 +162,14 @@ def visualize_example_in_2D(type="spheres"):
 
     num_rand_seeds = int(0.05 * n)
     x0 = np.full(shape=(n, 1), fill_value=0)
-    random_seeds = np.random.choice(np.arange(n), size=num_rand_seeds)
+    random_seeds = np.random.choice(np.arange(n), size=num_rand_seeds, replace=False)
+    assert len(set(random_seeds)) == num_rand_seeds, f"Did not select the right number of seeds. Selected {len(set(random_seeds))} unique seeds instead of {num_rand_seeds}"
     x0[random_seeds[random_seeds < n / 2]] = -1
     x0[random_seeds[random_seeds > n / 2]] = 1
 
     fig, ax = plt.subplots(figsize=(6, 6))
     # formatting
-    unlabeled_idxs = (x0 == 0).reshape(
-        n,
-    )
+    unlabeled_idxs = np.zeros(n, dtype=bool)
     plt.scatter(
         data_matrix[unlabeled_idxs, 0],
         data_matrix[unlabeled_idxs, 1],
@@ -194,14 +193,12 @@ def visualize_example_in_2D(type="spheres"):
         )
 
     plt.scatter(data_matrix[pos_idxs, 0], data_matrix[pos_idxs, 1], marker="o", c="red")
-    plt.scatter(
-        data_matrix[neg_idxs, 0], data_matrix[neg_idxs, 1], marker="o", c="blue"
-    )
+    plt.scatter(data_matrix[neg_idxs, 0], data_matrix[neg_idxs, 1], marker="o", c="blue")
     ax.set_aspect("equal")
-    folder = "./ICML_figs/examples"
+    folder = os.path.join("ICML_figs", "examples")
     os.makedirs(folder, exist_ok=True)
-    filename = folder + "/example_" + type + ".pdf"
-    plt.savefig(filename, format="pdf", bbox_inches="tight")
+    filename = os.path.join(folder, f"example_{type}.pdf")
+    plt.savefig(filename, format="pdf", bbox_inches="tight", dpi=300)
     return
 
 
@@ -304,12 +301,7 @@ def graph_vs_hypergraph_AUC(
 
     # Setup problem
     n = 2 * pts_per_community
-    labels = np.hstack(
-        [
-            np.full(shape=int(n / 2), fill_value=-1),
-            np.full(shape=int(n / 2), fill_value=1),
-        ]
-    )
+    labels = np.hstack([np.full(shape=int(n / 2), fill_value=-1), np.full(shape=int(n / 2), fill_value=1)])
 
     for ambient_dim in dim_list:
         if manifold_type == "spheres":
@@ -510,48 +502,48 @@ def weighted_vs_unweighted_AUC(
 
 
 # Example function calls for recreating the figures in the paper
+if __name__ == '__main__':
+    visualize_example_in_2D(type="rectangles")
+    visualize_example_in_2D(type="spheres")
 
-# visualize_example_in_2D(type="rectangles")
-# visualize_example_in_2D(type="spheres")
+    graph_vs_hypergraph_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="spheres",
+        dim_list=[2, 4, 7, 15],
+        num_trials=50,
+        PPR_iterations=50,
+        save=True,
+        folder="./ICML_figs/spheres_gaussian_to_centroid_sigma=2",
+    )
 
-# graph_vs_hypergraph_AUC(
-#     node_weight_method="gaussian_to_centroid",
-#     manifold_type="spheres",
-#     dim_list=[2, 4, 7, 15],
-#     num_trials=50,
-#     PPR_iterations=50,
-#     save=True,
-#     folder="./ICML_figs/spheres_gaussian_to_centroid_sigma=2",
-# )
+    graph_vs_hypergraph_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="rectangles",
+        dim_list=[2, 4, 7, 15],
+        num_trials=50,
+        PPR_iterations=50,
+        save=True,
+        folder="./ICML_figs/rectangles_gaussian_to_centroid_sigma=2",
+    )
 
-# graph_vs_hypergraph_AUC(
-#     node_weight_method="gaussian_to_centroid",
-#     manifold_type="rectangles",
-#     dim_list=[2, 4, 7, 15],
-#     num_trials=50,
-#     PPR_iterations=50,
-#     save=True,
-#     folder="./ICML_figs/rectangles_gaussian_to_centroid_sigma=2",
-# )
+    weighted_vs_unweighted_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="spheres",
+        dim_list=[2, 15, 30],
+        num_trials=50,
+        PPR_iterations=50,
+        save=True,
+        folder="./ICML_figs/weighted_vs_unweighted_spheres_gaussian_to_centroid_sigma=2",
+        weight_norm_order=2,
+    )
 
-# weighted_vs_unweighted_AUC(
-#     node_weight_method="gaussian_to_centroid",
-#     manifold_type="spheres",
-#     dim_list=[2, 15, 30],
-#     num_trials=50,
-#     PPR_iterations=50,
-#     save=True,
-#     folder="./ICML_figs/weighted_vs_unweighted_spheres_gaussian_to_centroid_sigma=2",
-#     weight_norm_order=2,
-# )
-
-# weighted_vs_unweighted_AUC(
-#     node_weight_method="gaussian_to_centroid",
-#     manifold_type="rectangles",
-#     dim_list=[2, 15, 30],
-#     num_trials=50,
-#     PPR_iterations=50,
-#     save=True,
-#     folder="./ICML_figs/weighted_vs_unweighted_rectangles_gaussian_to_centroid_sigma=2",
-#     weight_norm_order=2,
-# )
+    weighted_vs_unweighted_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="rectangles",
+        dim_list=[2, 15, 30],
+        num_trials=50,
+        PPR_iterations=50,
+        save=True,
+        folder="./ICML_figs/weighted_vs_unweighted_rectangles_gaussian_to_centroid_sigma=2",
+        weight_norm_order=2,
+    )
