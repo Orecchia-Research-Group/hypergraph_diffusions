@@ -151,8 +151,8 @@ def visualize_example_in_2D(type="spheres"):
         _, data_matrix = generate_concentric_highdim(ambient_dim=2, verbose=False)
     elif type == "rectangles":
         # generate rectangles
-        inner_sidelengths = [1, 3, 1, 1, 1, 1, 1, 1]
-        outer_sidelengths = [2, 4, 2, 2, 2, 2, 2, 2]
+        inner_sidelengths = [1, 3]
+        outer_sidelengths = [2, 4]
         _, data_matrix = generate_concentric_highdim_rectangles(
             inner_sidelengths=inner_sidelengths[:2],
             outer_sidelengths=outer_sidelengths[:2],
@@ -163,13 +163,17 @@ def visualize_example_in_2D(type="spheres"):
     num_rand_seeds = int(0.05 * n)
     x0 = np.full(shape=(n, 1), fill_value=0)
     random_seeds = np.random.choice(np.arange(n), size=num_rand_seeds, replace=False)
-    assert len(set(random_seeds)) == num_rand_seeds, f"Did not select the right number of seeds. Selected {len(set(random_seeds))} unique seeds instead of {num_rand_seeds}"
+    assert (
+        len(set(random_seeds)) == num_rand_seeds
+    ), f"Did not select the right number of seeds. Selected {len(set(random_seeds))} unique seeds instead of {num_rand_seeds}"
     x0[random_seeds[random_seeds < n / 2]] = -1
     x0[random_seeds[random_seeds > n / 2]] = 1
 
     fig, ax = plt.subplots(figsize=(6, 6))
     # formatting
-    unlabeled_idxs = np.zeros(n, dtype=bool)
+    unlabeled_idxs = (x0 == 0).reshape(
+        n,
+    )
     plt.scatter(
         data_matrix[unlabeled_idxs, 0],
         data_matrix[unlabeled_idxs, 1],
@@ -193,7 +197,9 @@ def visualize_example_in_2D(type="spheres"):
         )
 
     plt.scatter(data_matrix[pos_idxs, 0], data_matrix[pos_idxs, 1], marker="o", c="red")
-    plt.scatter(data_matrix[neg_idxs, 0], data_matrix[neg_idxs, 1], marker="o", c="blue")
+    plt.scatter(
+        data_matrix[neg_idxs, 0], data_matrix[neg_idxs, 1], marker="o", c="blue"
+    )
     ax.set_aspect("equal")
     folder = os.path.join("ICML_figs", "examples")
     os.makedirs(folder, exist_ok=True)
@@ -217,91 +223,22 @@ def graph_vs_hypergraph_AUC(
     k = 5
     order = 2
     # parameters for rectangles
-    inner_sidelengths = [
-        1,
-        3,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-    ]
-    outer_sidelengths = [
-        2,
-        4,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-    ]
+    inner_sidelengths = np.ones(shape=max(dim_list))
+    inner_sidelengths[1] = 3
+    outer_sidelengths = np.full(shape=max(dim_list), fill_value=2)
+    outer_sidelengths[1] = 4
 
     if folder is not None:
         os.makedirs(folder, exist_ok=True)
 
     # Setup problem
     n = 2 * pts_per_community
-    labels = np.hstack([np.full(shape=int(n / 2), fill_value=-1), np.full(shape=int(n / 2), fill_value=1)])
+    labels = np.hstack(
+        [
+            np.full(shape=int(n / 2), fill_value=-1),
+            np.full(shape=int(n / 2), fill_value=1),
+        ]
+    )
 
     for ambient_dim in dim_list:
         if manifold_type == "spheres":
@@ -360,84 +297,10 @@ def weighted_vs_unweighted_AUC(
     k = 5
     order = 2
     # parameters for rectangles
-    inner_sidelengths = [
-        1,
-        3,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-    ]
-    outer_sidelengths = [
-        2,
-        4,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-    ]
+    inner_sidelengths = np.ones(shape=max(dim_list))
+    inner_sidelengths[1] = 3
+    outer_sidelengths = np.full(shape=max(dim_list), fill_value=2)
+    outer_sidelengths[1] = 4
 
     if folder is not None:
         os.makedirs(folder, exist_ok=True)
@@ -502,7 +365,7 @@ def weighted_vs_unweighted_AUC(
 
 
 # Example function calls for recreating the figures in the paper
-if __name__ == '__main__':
+if __name__ == "__main__":
     visualize_example_in_2D(type="rectangles")
     visualize_example_in_2D(type="spheres")
 
