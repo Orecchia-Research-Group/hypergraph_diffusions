@@ -224,7 +224,9 @@ def nonvectorized_infinity(
         first_min = (we * (xe - first_xmax).T).argmin(axis=1)
         first_xmin = xe[first_min, np.arange(first_max.shape[0])]
         if center_id is None:
-            y[i, :] = first_xmin + we[first_max] * (first_xmax - first_xmin) / (we[first_min] + we[first_max])
+            y[i, :] = first_xmin + we[first_max] * (first_xmax - first_xmin) / (
+                we[first_min] + we[first_max]
+            )
         else:
             y[i, :] = x[center_id[tuple(e)]]
         # NOTE: why multiply by an extra copy of we below? I've edited to line 230.
@@ -241,8 +243,13 @@ def nonvectorized_infinity(
         # to renormalize.
         # NOTE: is the use of degree here to compute a convex combination over argmins and argmaxes?
         # Gradient with node weights has an additional W^T_h out front
-        gradient_dist = (xe - y[i, :])
-        gradient[e] += (W[i, i] * np.einsum("vd,v,vd->vd", gradient_dist, de, maxmult / (de @ maxmult) + minmult / (de @ minmult)))
+        gradient_dist = xe - y[i, :]
+        gradient[e] += W[i, i] * np.einsum(
+            "vd,v,vd->vd",
+            gradient_dist,
+            de,
+            maxmult / (de @ maxmult) + minmult / (de @ minmult),
+        )
         # The following line performs slightly better, but the above line is cleaner
         # and used np.einsum, therefore it is OBVIOUSLY better
         # has not added hyperedge node weights below
@@ -343,7 +350,7 @@ def diffusion(
         new_x = x[-1] - h * precond_func(gradient)
         # print(np.array([x[-1].reshape(-1), cut_gradient.reshape(-1), label_gradient.reshape(-1), gradient.reshape(-1), dx.reshape(-1)]))
         # input()
-        if (T is not None and t >= T):
+        if T is not None and t >= T:
             if verbose > 0:
                 t_now = datetime.now()
                 print(
@@ -368,7 +375,9 @@ def sweep_cut(
     for i, h in enumerate(hypergraph):
         for v in h:
             hyperedges[v].append(i)
-    order = np.argsort(x)
+    # Make compatible with x.shape= (n,1)
+    # order = np.argsort(x)
+    order = np.argsort(x.flatten())
     is_in_L = np.zeros(n, bool)
     fx = 0
     vol = 0
