@@ -105,6 +105,7 @@ def graph_vs_hgraph_AUC_hist(AUC_vals, titlestring=None, save=False, folder=None
         assert (folder is not None) and (titlestring is not None)
         filename = folder + "/AUC_hist_" + titlestring + ".pdf"
         plt.savefig(filename, format="pdf", bbox_inches="tight")
+        plt.close()
     else:
         plt.show()
     return
@@ -149,6 +150,34 @@ def weighted_vs_unweighted_AUC_hist(
         assert (folder is not None) and (titlestring is not None)
         filename = folder + "/AUC_hist_" + titlestring + ".pdf"
         plt.savefig(filename, format="pdf", bbox_inches="tight")
+        plt.close()
+    else:
+        plt.show()
+    return
+
+
+def plot_confusion_matrices(cm_vals, titles=None, save=False, titlestring=None, folder=None, suffix=''):
+    fig, ax = plt.subplots(1, 2, sharey=True)
+    for i, vals in enumerate(cm_vals):
+        res = ax[i].imshow(vals, vmin=0, vmax=1, cmap=plt.cm.viridis, interpolation='nearest')
+        for x in range(2):
+            for y in range(2):
+                ax[i].annotate(f'{vals[x][y]:.2f}', xy=(y, x), color='w',
+                               horizontalalignment='center',
+                               verticalalignment='center')
+        if titles is not None and len(titles) == 2:
+            ax[i].set_title(titles[i])
+        ax[i].set_xticks([0, 1], ['Outer', 'Inner'])
+        ax[i].set_yticks([0, 1], ['Outer', 'Inner'])
+        ax[i].set_xlabel('Predicted')
+    ax[0].set_ylabel('Truth')
+    fig.suptitle(titlestring)
+    # cb = fig.colorbar(res)
+    if save:
+        assert (folder is not None) and (titlestring is not None)
+        filename = folder + "/Confusion_Matrix_" + titlestring + suffix + ".pdf"
+        plt.savefig(filename, format="pdf", bbox_inches="tight")
+        plt.close()
     else:
         plt.show()
     return
@@ -214,6 +243,7 @@ def visualize_example_in_2D(type="spheres"):
     os.makedirs(folder, exist_ok=True)
     filename = os.path.join(folder, f"example_{type}.pdf")
     plt.savefig(filename, format="pdf", bbox_inches="tight", dpi=300)
+    plt.close()
     return
 
 
@@ -262,6 +292,10 @@ def graph_vs_hypergraph_AUC(
                 )
             )
         AUC_vals = []
+        graph_confusion_matrix = np.zeros((2, 2))
+        hypergraph_confusion_matrix = np.zeros((2, 2))
+        graph_confusion_matrix_balanced = np.zeros((2, 2))
+        hypergraph_confusion_matrix_balanced = np.zeros((2, 2))
         for _ in range(num_trials):
             graph_x, hypergraph_x, _ = compare_estimated_labels(
                 "PPR",
@@ -277,6 +311,24 @@ def graph_vs_hypergraph_AUC(
             graph_auc_score = metrics.roc_auc_score(labels, graph_x)
             hypergraph_auc_score = metrics.roc_auc_score(labels, hypergraph_x)
 
+            graph_labels = 2 * (graph_x >= 0) - 1
+            graph_confusion_matrix += metrics.confusion_matrix(labels, graph_labels) / (num_trials * n) * 2
+
+            graph_argidx = np.argsort(graph_x)
+            graph_labels = np.zeros(n)
+            graph_labels[graph_argidx[:n//2]] = -1
+            graph_labels[graph_argidx[n // 2:]] = 1
+            graph_confusion_matrix_balanced += metrics.confusion_matrix(labels, graph_labels) / (num_trials * n) * 2
+
+            hypergraph_labels = 2 * (hypergraph_x >= 0) - 1
+            hypergraph_confusion_matrix += metrics.confusion_matrix(labels, graph_labels) / (num_trials * n) * 2
+
+            hypergraph_argidx = np.argsort(hypergraph_x)
+            hypergraph_labels = np.zeros(n)
+            hypergraph_labels[hypergraph_argidx[:n // 2]] = -1
+            hypergraph_labels[hypergraph_argidx[n // 2:]] = 1
+            hypergraph_confusion_matrix_balanced += metrics.confusion_matrix(labels, hypergraph_labels) / (num_trials * n) * 2
+
             AUC_vals.append((hypergraph_auc_score, graph_auc_score))
         if save:
             titlestring = manifold_type + "_dim=" + str(ambient_dim)
@@ -285,6 +337,11 @@ def graph_vs_hypergraph_AUC(
         graph_vs_hgraph_AUC_hist(
             AUC_vals, save=save, folder=folder, titlestring=titlestring
         )
+        plot_confusion_matrices((graph_confusion_matrix, hypergraph_confusion_matrix), titles=['Graph', 'Hypergraph'],
+                                save=save, folder=folder, titlestring=titlestring)
+        plot_confusion_matrices((graph_confusion_matrix_balanced, hypergraph_confusion_matrix_balanced), titles=['Graph', 'Hypergraph'],
+                                save=save, folder=folder, titlestring=titlestring, suffix='_balanced')
+
     return
 
 
@@ -335,10 +392,14 @@ def weighted_vs_unweighted_AUC(
 
         unweighted_AUC = []
         weighted_AUC = []
+        unweighted_confusion_matrix = np.zeros((2, 2))
+        weighted_confusion_matrix = np.zeros((2, 2))
+        unweighted_confusion_matrix_balanced = np.zeros((2, 2))
+        weighted_confusion_matrix_balanced = np.zeros((2, 2))
         for _ in range(num_trials):
-            for node_weight_method, val_list in [
-                (None, unweighted_AUC),
-                (node_weight_method, weighted_AUC),
+            for node_weight_method, val_list, conf_matrix, conf_matrix_balanced in [
+                (None, unweighted_AUC, unweighted_confusion_matrix, unweighted_confusion_matrix_balanced),
+                (node_weight_method, weighted_AUC, weighted_confusion_matrix, weighted_confusion_matrix_balanced),
             ]:
                 _, hypergraph_x, _ = compare_estimated_labels(
                     "PPR",
@@ -351,6 +412,14 @@ def weighted_vs_unweighted_AUC(
                     order=weight_norm_order,
                 )
                 val_list.append(metrics.roc_auc_score(labels, hypergraph_x))
+                hypergraph_labels = 2 * (hypergraph_x >= 0) - 1
+                conf_matrix += metrics.confusion_matrix(labels, hypergraph_labels) / (num_trials * n) * 2
+
+                hypergraph_argidx = np.argsort(hypergraph_x)
+                hypergraph_labels = np.zeros(n)
+                hypergraph_labels[hypergraph_argidx[:n // 2]] = -1
+                hypergraph_labels[hypergraph_argidx[n // 2:]] = 1
+                conf_matrix_balanced += metrics.confusion_matrix(labels, hypergraph_labels) / (num_trials * n) * 2
         if save:
             titlestring = manifold_type + "_dim=" + str(ambient_dim)
         else:
@@ -364,51 +433,58 @@ def weighted_vs_unweighted_AUC(
             save=save,
             folder=folder,
         )
+        plot_confusion_matrices((unweighted_confusion_matrix, weighted_confusion_matrix), titles=['Unweighted', 'Weighted'],
+                                save=save, folder=folder, titlestring=titlestring)
+        plot_confusion_matrices((unweighted_confusion_matrix_balanced, weighted_confusion_matrix_balanced),
+                                titles=['Unweighted', 'Weighted'],
+                                save=save, folder=folder, titlestring=titlestring, suffix='balanced')
     return
 
 
 # Example function calls for recreating the figures in the paper
-if __name__ == "__main__":
-    # visualize_example_in_2D(type="rectangles")
-    # visualize_example_in_2D(type="spheres")
+if __name__ == '__main__':
+    visualize_example_in_2D(type="rectangles")
+    visualize_example_in_2D(type="spheres")
+    num_trials = 50
+    PPR_iterations = 50
 
-    # graph_vs_hypergraph_AUC(
-    #     node_weight_method="gaussian_to_centroid",
-    #     manifold_type="spheres",
-    #     dim_list=[2, 4, 7, 15],
-    #     num_trials=50,
-    #     PPR_iterations=50,
-    #     save=True,
-    #     folder="./ICML_figs/spheres_gaussian_to_centroid_sigma=2",
-    # )
+    graph_vs_hypergraph_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="spheres",
+        dim_list=[2, 4, 7, 15],
+        num_trials=num_trials,
+        PPR_iterations=PPR_iterations,
+        save=True,
+        folder="./ICML_figs/spheres_gaussian_to_centroid_sigma=2",
+    )
 
-    # graph_vs_hypergraph_AUC(
-    #     node_weight_method="gaussian_to_centroid",
-    #     manifold_type="rectangles",
-    #     dim_list=[2, 4, 7, 15],
-    #     num_trials=50,
-    #     PPR_iterations=50,
-    #     save=True,
-    #     folder="./ICML_figs/rectangles_gaussian_to_centroid_sigma=2",
-    # )
+    graph_vs_hypergraph_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="rectangles",
+        dim_list=[2, 4, 7, 15],
+        num_trials=num_trials,
+        PPR_iterations=PPR_iterations,
+        save=True,
+        folder="./ICML_figs/rectangles_gaussian_to_centroid_sigma=2",
+    )
 
-    # weighted_vs_unweighted_AUC(
-    #     node_weight_method="gaussian_to_centroid",
-    #     manifold_type="spheres",
-    #     dim_list=[2, 15, 30],
-    #     num_trials=50,
-    #     PPR_iterations=50,
-    #     save=True,
-    #     folder="./ICML_figs/weighted_vs_unweighted_spheres_gaussian_to_centroid_sigma=2",
-    #     weight_norm_order=2,
-    # )
+    weighted_vs_unweighted_AUC(
+        node_weight_method="gaussian_to_centroid",
+        manifold_type="spheres",
+        dim_list=[2, 15, 30],
+        num_trials=num_trials,
+        PPR_iterations=PPR_iterations,
+        save=True,
+        folder="./ICML_figs/weighted_vs_unweighted_spheres_gaussian_to_centroid_sigma=2",
+        weight_norm_order=2,
+    )
 
     weighted_vs_unweighted_AUC(
         node_weight_method="gaussian_to_centroid",
         manifold_type="rectangles",
         dim_list=[2, 15, 30],
-        num_trials=50,
-        PPR_iterations=50,
+        num_trials=num_trials,
+        PPR_iterations=PPR_iterations,
         save=True,
         folder="./ICML_figs/weighted_vs_unweighted_rectangles_gaussian_to_centroid_sigma=2",
         weight_norm_order=2,
