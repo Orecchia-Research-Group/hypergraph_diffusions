@@ -157,7 +157,7 @@ def weighted_vs_unweighted_AUC_hist(
 
 
 def plot_confusion_matrices(cm_vals, titles=None, save=False, titlestring=None, folder=None, suffix=''):
-    fig, ax = plt.subplots(1, 2, sharey=True)
+    fig, ax = plt.subplots(2, 1, sharex=True)
     for i, vals in enumerate(cm_vals):
         res = ax[i].imshow(vals, vmin=0, vmax=1, cmap=plt.cm.viridis, interpolation='nearest')
         for x in range(2):
@@ -168,15 +168,16 @@ def plot_confusion_matrices(cm_vals, titles=None, save=False, titlestring=None, 
         if titles is not None and len(titles) == 2:
             ax[i].set_title(titles[i])
         ax[i].set_xticks([0, 1], ['Outer', 'Inner'])
-        ax[i].set_yticks([0, 1], ['Outer', 'Inner'])
-        ax[i].set_xlabel('Predicted')
-    ax[0].set_ylabel('Truth')
-    fig.suptitle(titlestring)
+        ax[i].set_yticks([0, 1], ['Outer', 'Inner'], rotation=90)
+        ax[i].set_ylabel('Truth')
+    ax[1].set_xlabel('Predicted')
+
+    # fig.suptitle(titlestring)
     # cb = fig.colorbar(res)
     if save:
         assert (folder is not None) and (titlestring is not None)
-        filename = folder + "/Confusion_Matrix_" + titlestring + suffix + ".pdf"
-        plt.savefig(filename, format="pdf", bbox_inches="tight")
+        filename = folder + "/Confusion_Matrix_" + titlestring + suffix + ".png"
+        plt.savefig(filename, format="png", bbox_inches="tight", dpi=300)
         plt.close()
     else:
         plt.show()
