@@ -74,11 +74,11 @@ def read_hypergraph(filename):
                 c_ind = int(line[start]) - 1
                 start += 1
             if hyperedge_has_node_weights:
-                nodes = tuple([int(i) - 1 for i in line[start::2]])
+                nodes = ([int(i) - 1 for i in line[start::2]])
                 hyperedge_node_weights = [float(i) for i in line[start + 1::2]]
                 hypergraph_node_weights[nodes] = hyperedge_node_weights
             else:
-                nodes = tuple([int(i) - 1 for i in line[start:]])
+                nodes = ([int(i) - 1 for i in line[start:]])
             hypergraph.append(nodes)
             if has_edge_weights:
                 weights[hypergraph[-1]] = w

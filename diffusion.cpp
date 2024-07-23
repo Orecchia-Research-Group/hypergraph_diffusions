@@ -8,34 +8,15 @@
 #include <iterator>
 #include <chrono>
 #include <ctime>
+#include <cassert>
 
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
-#include <Eigen/IterativeLinearSolvers>
 
 #include "diffusion.h"
 
-
-MatrixReplacement::Index MatrixReplacement::rows() const { return mp_mat->rows(); }
-MatrixReplacement::Index MatrixReplacement::cols() const { return mp_mat->cols(); }
-
-template<typename Rhs>
-Eigen::VectorXd MatrixReplacement::operator*(const Eigen::MatrixBase<Rhs>& x) const {
-    Eigen::VectorXd y = (*mp_mat) * x;
-    double x_sum = x.sum();
-    for(int i = 0; i < y.size(); i++)
-        y(i) += x_sum;
-    return y;
-}
-
-void MatrixReplacement::attachMyMatrix(const Eigen::SparseMatrix<double> &mat) {
-    mp_mat = &mat;
-}
-
-const Eigen::SparseMatrix<double> MatrixReplacement::my_matrix() const { return *mp_mat; }
-
-
 void GraphSolver::read_hypergraph(std::string filename) {
+    assert(this->hypergraph.size() == 0 && "Illegal call to read_hypergraph. Object hypergraph is not empty. Undefined behavior.");
     int fmt;
     std::string line;
     std::ifstream input_file;
@@ -43,25 +24,49 @@ void GraphSolver::read_hypergraph(std::string filename) {
     input_file >> this->m >> this->n >> fmt;
     getline(input_file, line);
 
+    bool has_edge_weights = fmt % 10;
+    bool has_node_weights = (fmt / 10) % 10;
+    bool hyperedge_has_node_weights = (fmt / 100) % 10;
+    bool has_hyperedge_centers = (fmt / 1000) % 10;
+
     // Read hyperedges
     for(int i = 0; i < m; i++) {
         std::vector<int> hyperedge;
+        std::vector<double> hyperedge_node_weights;
         int node;
+        double d_value;
         getline(input_file, line);
         std::istringstream iss(line);
+        if(has_edge_weights) {
+            iss >> d_value;
+            this->weights.push_back(d_value);
+        }
+        if(has_hyperedge_centers) {
+            iss >> node;
+            this->center_id.push_back(node);
+        }
         while(iss >> node) {
             hyperedge.push_back(node - 1);
+            if(hyperedge_has_node_weights) {
+                iss >> d_value;
+                hyperedge_node_weights.push_back(d_value);
+            }
         }
         this->hypergraph.push_back(hyperedge);
+        if(hyperedge_has_node_weights) {
+            hypergraph_node_weights.push_back(hyperedge_node_weights);    
+        }
     }
 
     this->degree = Eigen::VectorXd(n);
 
     // Read degrees
-    for(int i = 0; i < n; i++) {
-        double d;
-        input_file >> d;
-        this->degree(i) = d;
+    if(has_node_weights) {
+        for(int i = 0; i < n; i++) {
+            double d;
+            input_file >> d;
+            this->degree(i) = d;
+        }
     }
     input_file.close();
 }
@@ -111,12 +116,6 @@ GraphSolver::GraphSolver(std::string graph_filename, std::string label_filename,
     read_hypergraph(graph_filename);
     if(!label_filename.empty()) read_labels(label_filename);
     if(!preconditioner.empty() || preconditioner.compare("degree") == 0) preconditionerType = 0;
-    else if(preconditioner.compare("star") == 0) {
-        preconditionerType = 1;
-        starLaplacian = create_laplacian();
-        L.attachMyMatrix(starLaplacian);
-        solver.compute(L);
-    }
     else {
         perror("Unknown type of preconditioner.");
         exit(1);
@@ -125,40 +124,96 @@ GraphSolver::GraphSolver(std::string graph_filename, std::string label_filename,
 }
 
 GraphSolver::GraphSolver(int n, int m, Eigen::VectorXd degree, std::vector<std::vector<int>> hypergraph, int label_count, std::vector<int> labels, int verbose):
-    n(n), m(m), graph_name(""), degree(degree), hypergraph(hypergraph), label_count(label_count), labels(labels), early_stopping(-1), verbose(verbose) {};
+    n(n), m(m), graph_name(""), degree(degree), hypergraph(hypergraph), label_count(label_count), early_stopping(-1), verbose(verbose), preconditionerType(0) {
+        std::map<int, int> label_map;
+        int found_labels = 0;
+        for(auto it = labels.begin(); it != labels.end(); it++) {
+            if(label_map.find(*it) == label_map.end()) {
+                label_map[*it] = found_labels++;
+            }
+        }
+        for(auto it = labels.begin(); it != labels.end(); it++) {
+            this->labels.push_back(label_map[*it]);
+        }
+};
 
 Eigen::MatrixXd GraphSolver::infinity_subgradient(Eigen::MatrixXd x) {
     size_t d = x.rows();
+    std::vector<int>::iterator it;
     Eigen::MatrixXd gradient(d, n);
     gradient.setZero();
     for(int k = 0; k < x.rows(); k++) {
-        bool * is_max = new bool[n];
-        bool * is_min = new bool[n];
         for(int j = 0; j < m; j++) {
+            double u = 0;
             if(hypergraph[j].size() == 0)
                 continue;
-            double ymin = INFINITY;
-            double ymax = -INFINITY;
-            for(auto it = hypergraph[j].begin(); it != hypergraph[j].end(); it++) {
-                ymin = fmin(ymin, x(k, *it));
-                ymax = fmax(ymax, x(k, *it));
+            if(this->center_id.size() > 0) {
+                u = x(k, center_id[j]);
+            } else {
+                // Find \min_u \|x_h - u 1\|_{w, \infty}
+                size_t i;
+                double dist;
+                double first_max = -INFINITY;
+                double first_max_weight = 1;
+                for(it = hypergraph[j].begin(), i = 0; it != hypergraph[j].end(); it++, i++) {
+                    double w = this->hypergraph_node_weights.size() > 0 ? hypergraph_node_weights[j][i] : 1;
+                    dist = x(k, *it) * w;
+                    if(first_max < dist) {
+                        first_max = dist;
+                        first_max_weight = w;
+                    }
+                }
+                double first_min = INFINITY;
+                double first_min_weight = 1;
+                for(it = hypergraph[j].begin(), i = 0; it != hypergraph[j].end(); it++, i++) {
+                    double w = this->hypergraph_node_weights.size() > 0 ? hypergraph_node_weights[j][i] : 1;
+                    dist = (x(k, *it) - first_max) * w;
+                    if(first_min > dist) {
+                        first_min = dist;
+                        first_min_weight = w;
+                    }
+                }
+                u = first_min + first_max_weight * (first_max - first_min) / (first_max_weight + first_min_weight);
             }
-            double u = ymin + (ymax - ymin) / 2;
-            double total_min_degree = 0;
-            double total_max_degree = 0;
-            for(auto it = hypergraph[j].begin(); it != hypergraph[j].end(); it++) {
-                is_min[*it] = (ymin == x(k, *it));
-                is_max[*it] = (ymax == x(k, *it));
-                total_min_degree += is_min[*it] * degree(*it);
-                total_max_degree += is_max[*it] * degree(*it);
+
+            // Determine (weighted) distances from u
+            int h_size = hypergraph[j].size();
+            std::vector<double> dist(h_size);
+            std::vector<bool> argmax(h_size);
+            std::vector<bool> argmin(h_size);
+
+            double dist_min = INFINITY;
+            double dist_max = -INFINITY;
+
+            for(int i = 0; i < h_size; i++) {
+                double w = hypergraph_node_weights.size() > 0 ? hypergraph_node_weights[j][i] : 1;
+                dist[i] = w * (x(k, hypergraph[j][i]) - u);
+                if(dist_min > dist[i])
+                    dist_min = dist[i];
+                if(dist_max < dist[i])
+                    dist_max = dist[i];
             }
-            for(long unsigned int i = 0; i < hypergraph[j].size(); i++) {
+
+            // Determine minimizers and maximizers
+            for(int i = 0; i < h_size; i++) {
+                argmin[i] = dist[i] == dist_min;
+                argmax[i] = dist[i] == dist_max;
+            }
+
+            // Compute maximizer and minimizer normalization
+            double max_sum = 0;
+            double min_sum = 0;
+            for(int i = 0; i < h_size; i++) {
+                max_sum += argmax[i] * degree[hypergraph[j][i]];
+                min_sum += argmin[i] * degree[hypergraph[j][i]];
+            }
+
+            // Update gradients 
+            for(int i = 0; i < h_size; i++) {
                 int node = hypergraph[j][i];
-                gradient(k, node) += (x(k, node) - u) * degree(node) * (is_min[node] / total_min_degree + is_max[node] / total_max_degree);
+                gradient(k, node) += dist[i] * (argmax[i] / max_sum + argmin[i] / min_sum);
             }
         }
-        delete[] is_max;
-        delete[] is_min;
     }
     return gradient;
 }
@@ -194,16 +249,6 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
                 for(int j = 0; j < d; j++)
                     for(int i = 0; i < n; i++)
                         dx(j, i) = gradient(j, i) / degree(i);
-                break;
-            case 1:
-                for(int j = 0; j < d; j++) {
-                    Eigen::VectorXd augmented(n+m);
-                    Eigen::VectorXd conditioned(n+m);
-                    augmented.setZero();
-                    augmented(Eigen::seq(0, n-1)) = gradient.row(j);
-                    conditioned = solver.solve(augmented);
-                    dx.row(j) = conditioned(Eigen::seq(0, n-1));
-                }
                 break;
         }
         switch(schedule % 2) {

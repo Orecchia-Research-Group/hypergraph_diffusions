@@ -78,7 +78,6 @@ def make_regularizer(reg_string, n, m, D, hypergraph, weights):
     return regularizers[reg_string](n, m, D, hypergraph, weights)
 
 
-# FUCK numpy for not supporting weighted norms
 def weighted_median(values, sample_weight=None):
     """Very close to numpy.percentile, but supports weights.
     NOTE: quantiles should be in [0, 1]!
