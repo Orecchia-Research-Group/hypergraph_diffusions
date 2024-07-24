@@ -72,12 +72,11 @@ def animate_diffusion(graph_name, diffusion_function, degree, x, fx, label_names
 
         # Plot function
         if cost == 'fx':
-            cost_values.append(hyper_fx)
+            cost_values.append(hyper_fx.sum(axis=1))
         elif cost == 'variance':
             x_bar = np.einsum('i,ij->j', degree[i], hyper_x[0, :, :]) * (1 / sum(degree[i]))
             dx = hyper_x - x_bar
             cost_values.append(np.einsum('i,kij,kij->k', degree[i], dx, dx))
-        # print(cost_values[i])
         x_axis = np.arange(len(cost_values[i]))
         func_ax.fill_between(x_axis, cost_values[i].reshape(-1), alpha=0.3, color='k')
         vline.append(func_ax.axvline(x=0, color=color_list[i], linewidth=0.5))
