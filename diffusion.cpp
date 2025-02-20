@@ -398,5 +398,4 @@ void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, dou
 void SetExpansionGraphSolver::post_process_per_iteration(Eigen::MatrixXd &x) {
     x = (x.array() < 0).select(-1, x);
     x = (x.array() > 0).select(1, x);
-    // std::cout << "You are not losing your mind" << std::endl;
 }
