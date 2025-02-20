@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
     auto args = options.parse(argc, argv);
     verbose = args.count("verbose");
     
-    GraphSolver G(graph_filename, label_filename, preconditioner, verbose);
+    SetExpansionGraphSolver G(graph_filename, label_filename, preconditioner, verbose);
     G.early_stopping = early_stopping;
     
     if(maximum_revealed > G.n) {

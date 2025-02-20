@@ -218,6 +218,15 @@ Eigen::MatrixXd GraphSolver::infinity_subgradient(Eigen::MatrixXd x) {
     return gradient;
 }
 
+
+void GraphSolver::post_process_per_iteration(Eigen::MatrixXd &x) {
+    // Run after each iteration, changing the current iterate
+    // Dummy function in this class, but can be used for other applications
+    // like set expansion
+    return;
+}
+
+
 Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int T, double lambda, double h, int schedule) {
     // schedule:
     //      0 --> h
@@ -258,6 +267,7 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
                 step = h / sqrt(t + 1);
         }
         x -= step * dx;
+        post_process_per_iteration(x);
         solution += x;
         
         double current_fx = this->compute_fx(x, s, lambda);
@@ -297,6 +307,7 @@ Eigen::MatrixXd GraphSolver::diffusion(const Eigen::SparseMatrix<double> s, int 
     for(int j = 0; j < d; j++) {
         best_solution.row(j) /= best_t;
     }
+    // std::cout << x << std::endl;
     return best_solution;
 }
 
@@ -377,7 +388,15 @@ void GraphSolver::run_diffusions(std::string graph_name, int repeats, int T, dou
             // for(int t=0; t < T; t++)
             //    cout << t+1 << " " << fx[t] << endl;
             std::cout << graph_name << ",C++," << repeat << "," << revealed << "," << lambda << "," << time.count() << "," << error << "," << fx / label_count << "," << h << std::endl;
+            // std::cout << solution << std::endl;
         }
     }
     delete[] order;
+}
+
+
+void SetExpansionGraphSolver::post_process_per_iteration(Eigen::MatrixXd &x) {
+    x = (x.array() < 0).select(-1, x);
+    x = (x.array() > 0).select(1, x);
+    // std::cout << "You are not losing your mind" << std::endl;
 }
