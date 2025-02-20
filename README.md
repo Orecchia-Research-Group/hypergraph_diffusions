@@ -8,6 +8,12 @@ Inside the `data` directory, run the following command
 python hypergraphs2hmetis.py -vv
 ```
 
+If you want to build only one example dataset you can use
+
+```python
+python hypergraphs2hmetis.py -i Paper_datasets -o Paper_datasets -n covertype -vv -t 4 5 --suffix 45
+```
+
 ## Step 2: Run the animation
 
 From the top level you can run this command
@@ -28,13 +34,14 @@ python ICML2024_Figure_Generation.py
 
 # Fast C++ implementation
 
-For using the fast C++ implementation you will first need to install the Eigen library
+For using the fast C++ implementation you will first need to install the Eigen and cxxopts libraries
 
 ```
 sudo apt install libeigen3-dev
+sagi libcxxopts-dev
 ```
 
-Or download it through [here](https://eigen.tuxfamily.org/dox/GettingStarted.html). Make sure that the `Eigen` folder is available in `/usr/include`.
+Or download Eigen through [here](https://eigen.tuxfamily.org/dox/GettingStarted.html) and cxxopt through [here](https://github.com/jarro2783/cxxopts/blob/master/INSTALL). Make sure that both are available in `/usr/include`.
 
 Install `pybind11`
 
